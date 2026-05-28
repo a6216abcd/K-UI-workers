@@ -132,13 +132,11 @@
         body.theme5 #probe-map-container { background-color: #0d1117; border-color: #30363d; background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px); }
     </style>
 </head>
-<body class="theme1">
+<body id="main-body">
     
     <div id="app" v-cloak>
-        <!-- ================= 探针全景大盘 (未登录或主动切换) ================= -->
-        <div v-if="!isLoggedIn || activeTab === 'probe'" class="probe-body" :class="probeSys.theme">
+        <div v-if="!isLoggedIn || activeTab === 'probe'" class="probe-body">
             
-            <!-- 覆盖层：登录 Modal -->
             <div v-if="showLoginModal" class="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center">
                 <div class="bg-white/80 backdrop-blur-xl border border-white p-10 rounded-[2.5rem] shadow-2xl w-full max-w-sm relative">
                     <button @click="showLoginModal = false" class="absolute top-4 right-5 text-2xl text-slate-400 hover:text-slate-600">&times;</button>
@@ -151,7 +149,6 @@
             </div>
 
             <div class="probe-container">
-                <!-- Header -->
                 <div class="flex justify-between items-center mb-8 flex-wrap gap-4 header">
                     <h1 class="text-2xl font-black m-0 flex items-center gap-3">
                         <span v-if="probeDetailId" @click="probeDetailId = null" class="cursor-pointer text-blue-500 hover:underline text-sm font-medium">⬅ 返回</span>
@@ -169,7 +166,6 @@
                     </div>
                 </div>
 
-                <!-- Detail View -->
                 <div v-if="probeDetailId">
                     <div class="probe-header-card header-card">
                         <div class="flex items-center mb-4">
@@ -191,14 +187,14 @@
                     </div>
                     
                     <div class="probe-charts-grid charts-grid">
-                        <div class="probe-chart-card chart-card"><h3 class="mt-0 text-base flex justify-between">CPU <span>{{ probeDetail.cpu || 0 }}%</span></h3><canvas id="probeChartCPU"></canvas></div>
-                        <div class="probe-chart-card chart-card"><h3 class="mt-0 text-base flex justify-between">内存 <span>{{ probeDetail.ram || 0 }}%</span></h3><div class="text-xs text-gray-500 mb-1">Swap: {{ probeDetail.swap_used }} / {{ probeDetail.swap_total }} MiB</div><canvas id="probeChartRAM"></canvas></div>
+                        <div class="probe-chart-card chart-card"><h3 class="mt-0 text-base flex justify-between">CPU <span class="stat-val">{{ probeDetail.cpu || 0 }}%</span></h3><canvas id="probeChartCPU"></canvas></div>
+                        <div class="probe-chart-card chart-card"><h3 class="mt-0 text-base flex justify-between">内存 <span class="stat-val">{{ probeDetail.ram || 0 }}%</span></h3><div class="text-xs text-gray-500 mb-1">Swap: {{ probeDetail.swap_used }} / {{ probeDetail.swap_total }} MiB</div><canvas id="probeChartRAM"></canvas></div>
                         <div class="probe-chart-card chart-card">
-                            <h3 class="mt-0 text-base flex justify-between">磁盘 <span>{{ probeDetail.disk || 0 }}%</span></h3>
+                            <h3 class="mt-0 text-base flex justify-between">磁盘 <span class="stat-val">{{ probeDetail.disk || 0 }}%</span></h3>
                             <div class="w-full h-5 bg-gray-200 rounded-full overflow-hidden mt-10"><div id="disk-bar" class="h-full transition-all duration-500" :style="{width: (probeDetail.disk || 0) + '%', background: '#34d399'}"></div></div>
                             <p class="text-right text-xs text-gray-500 mt-2">{{ (probeDetail.disk_used/1024).toFixed(2) }} GiB / {{ (probeDetail.disk_total/1024).toFixed(2) }} GiB</p>
                         </div>
-                        <div class="probe-chart-card chart-card"><h3 class="mt-0 text-base flex justify-between">进程数 <span>{{ probeDetail.processes || 0 }}</span></h3><canvas id="probeChartProc"></canvas></div>
+                        <div class="probe-chart-card chart-card"><h3 class="mt-0 text-base flex justify-between">进程数 <span class="stat-val">{{ probeDetail.processes || 0 }}</span></h3><canvas id="probeChartProc"></canvas></div>
                         <div class="probe-chart-card chart-card"><h3 class="mt-0 text-base flex justify-between">网络速度 <span class="text-sm speed-val"><span class="text-emerald-500">↓</span> {{ formatBytes(probeDetail.net_in_speed) }}/s | <span class="text-blue-500">↑</span> {{ formatBytes(probeDetail.net_out_speed) }}/s</span></h3><canvas id="probeChartNet"></canvas></div>
                         <div class="probe-chart-card chart-card"><h3 class="mt-0 text-base flex justify-between">TCP / UDP <span class="text-sm speed-val">TCP {{ probeDetail.tcp_conn || 0 }} | UDP {{ probeDetail.udp_conn || 0 }}</span></h3><canvas id="probeChartConn"></canvas></div>
                         <div class="probe-chart-card probe-chart-full chart-card chart-full">
@@ -208,7 +204,6 @@
                     </div>
                 </div>
 
-                <!-- List View (No Detail) -->
                 <div v-else>
                     <div class="probe-filter-bar filter-bar">
                         <span class="probe-filter-tag filter-tag active">全部 {{ publicProbeServers.length }}</span>
@@ -223,7 +218,6 @@
                         <div class="probe-g-item g-item"><div class="probe-g-label g-label">实时网速 (入 | 出)</div><div class="probe-g-val g-val"><span class="text-emerald-500">↓</span> {{ formatBytes(probeGlobalSpeedIn) }}/s | <span class="text-blue-500">↑</span> {{ formatBytes(probeGlobalSpeedOut) }}/s</div></div>
                     </div>
 
-                    <!-- Card View -->
                     <div v-if="probeView === 'card'">
                         <template v-if="Object.keys(probeGroups).length === 0"><p class="text-center text-gray-500 w-full mt-10">暂无公开服务器</p></template>
                         <template v-for="(servers, groupName) in probeGroups" :key="groupName">
@@ -284,7 +278,6 @@
                         </template>
                     </div>
 
-                    <!-- Table View -->
                     <div v-if="probeView === 'table'" class="overflow-x-auto">
                         <table class="probe-custom-table custom-table">
                             <thead><tr><th>状态</th><th>节点名称</th><th>地区</th><th>系统/架构/虚拟化</th><th>CPU</th><th>内存</th><th>磁盘</th><th>流量(入|出)</th><th>下行</th><th>上行</th><th>更新</th></tr></thead>
@@ -307,7 +300,6 @@
                         </table>
                     </div>
 
-                    <!-- Map View -->
                     <div v-show="probeView === 'map'">
                         <div id="probe-map-container"></div>
                     </div>
@@ -321,7 +313,6 @@
             </div>
         </div>
 
-        <!-- ================= KUI 面板主界面 (已登录且非探针Tab) ================= -->
         <div v-if="isLoggedIn && activeTab !== 'probe'" class="max-w-6xl mx-auto space-y-8 animate-fade-in p-4 md:p-8">
             
             <div class="bg-white/70 backdrop-blur-xl border border-white/80 p-4 md:px-6 rounded-[2rem] shadow-xl shadow-slate-200/50 flex flex-col lg:flex-row justify-between items-center sticky top-4 z-50 gap-4">
@@ -341,7 +332,6 @@
                 </div>
             </div>
 
-            <!-- KUI 核心导航区 -->
             <div class="flex justify-center mb-4">
                 <div class="bg-slate-200/50 p-1.5 rounded-full flex flex-wrap justify-center gap-1 backdrop-blur-sm border border-white/50 shadow-inner">
                     <template v-if="role === 'admin'">
@@ -358,9 +348,7 @@
                 </div>
             </div>
 
-            <!-- ================= KUI 管理员节点/用户区 ================= -->
             <div v-if="role === 'admin' && activeTab === 'nodes'" class="space-y-8">
-                <!-- 大盘统计 -->
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div class="bg-white/60 backdrop-blur-xl p-5 rounded-[2rem] border border-white shadow-lg shadow-indigo-100/30 text-center"><div class="text-[10px] text-slate-400 font-bold mb-1 tracking-widest">ONLINE SERVERS</div><div class="text-3xl font-black text-slate-700">{{ globalOnline }} / {{ servers.length }}</div></div>
                     <div class="bg-white/60 backdrop-blur-xl p-5 rounded-[2rem] border border-white shadow-lg shadow-indigo-100/30 text-center"><div class="text-[10px] text-slate-400 font-bold mb-1 tracking-widest">AGGREGATE TRAFFIC</div><div class="text-3xl font-black text-slate-700">{{ formatBytes(globalTraffic) }}</div></div>
@@ -544,6 +532,7 @@
                                         <td class="p-4"><span v-if="isOnline(s.last_updated)" class="text-emerald-500 font-bold">● 在线</span><span v-else class="text-rose-500 font-bold">● 离线</span></td>
                                         <td class="p-4 flex gap-2">
                                             <button @click="openProbeEditModal(s)" class="bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-1.5 rounded-lg font-bold transition">编辑展示信息</button>
+                                            <button @click="deleteProbeNode(s.id)" class="bg-rose-50 text-rose-600 hover:bg-rose-100 px-3 py-1.5 rounded-lg font-bold transition">删除记录</button>
                                         </td>
                                     </tr>
                                 </tbody>
@@ -875,6 +864,11 @@
                 const openProbeEditModal = (s) => { editingProbeNode.value = JSON.parse(JSON.stringify(s)); if(!editingProbeNode.value.is_hidden) editingProbeNode.value.is_hidden = 'false'; probeEditModalOpen.value = true; };
                 const saveProbeEdit = async () => { await fetchApi('/api/probe/admin/server', { method: 'PUT', body: JSON.stringify(editingProbeNode.value) }); probeEditModalOpen.value = false; refreshData(); fetchProbeData(); };
                 
+                const deleteProbeNode = async (id) => {
+                    if (!confirm("⚠️ 确定要彻底删除该探针记录吗？如果机器还在运行 Agent，之后会自动复活！请确保先在面板的「服务器与节点」中删除此机器。")) return;
+                    await fetchApi(`/api/probe/admin/server?id=${id}`, { method: 'DELETE' }); refreshData(); fetchProbeData();
+                };
+
                 let dataTimer = null; let pingTimer = null; let probeTimer = null;
                 const startPolling = () => { 
                     if (!dataTimer) { refreshData(); dataTimer = setInterval(() => { if (isLoggedIn.value && !document.hidden && activeTab.value !== 'probe') refreshData(); }, 2500); }
@@ -896,7 +890,7 @@
                     getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateSubLink, copyCommand, 
                     globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, saveSiteTitle, userNewPassword, updateUserPassword, resetMySubLink, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,
                     probeSys, publicProbeServers, probeView, probeDetailId, probeDetail, setProbeView, openProbeDetail, probeGlobalOnline, probeGlobalOffline, probeGlobalSpeedIn, probeGlobalSpeedOut, probeGlobalNetRx, probeGlobalNetTx, probeGroups, probeCountryStats,
-                    saveProbeSettings, adminProbeServers, probeEditModalOpen, editingProbeNode, openProbeEditModal, saveProbeEdit, currentDomain
+                    saveProbeSettings, adminProbeServers, probeEditModalOpen, editingProbeNode, openProbeEditModal, saveProbeEdit, deleteProbeNode, currentDomain
                 };
             }
         }).mount('#app');
