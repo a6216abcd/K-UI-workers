@@ -10,6 +10,8 @@
     <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -22,7 +24,6 @@
         ::-webkit-scrollbar-thumb:hover { background: rgba(107, 114, 128, 0.8); }
         input:focus, select:focus, textarea:focus { outline: none; box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.4); }
 
-        /* ================= 探针前台大盘核心样式 ================= */
         .probe-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: transparent; color: #333; margin: 0; padding: 20px; transition: all 0.3s; min-height: 100vh;}
         body:not(.theme6) .probe-body { background-color: #f4f5f7; }
         
@@ -53,13 +54,11 @@
         .probe-stat-bar-full > div { height: 100%; border-radius: 3px; transition: width 0.3s; }
         .probe-stat-subtext { font-size: 11px; color: #6b7280; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-        /* Table View */
         .probe-custom-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
         .probe-custom-table th { background: #f8fafc; padding: 14px 16px; color: #64748b; font-weight: 600; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
         .probe-custom-table td { padding: 12px 16px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
         .probe-custom-table tr:hover { background: #f8fafc; cursor: pointer;}
         
-        /* Toggle & Filter */
         .probe-view-controls { display: flex; gap: 8px; background: rgba(0,0,0,0.05); padding: 4px; border-radius: 8px; }
         .probe-toggle-btn { display: flex; align-items: center; gap: 6px; padding: 6px 14px; border: none; background: transparent; cursor: pointer; border-radius: 6px; font-size: 13px; font-weight: 600; color: #64748b; transition: all 0.2s; }
         .probe-toggle-btn.active { background: white; color: #3b82f6; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -67,11 +66,9 @@
         .probe-filter-tag { display: inline-flex; align-items: center; gap: 5px; background: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; color: #475569; box-shadow: 0 1px 3px rgba(0,0,0,0.05); cursor:pointer; border: 1px solid transparent;}
         .probe-filter-tag.active { background: #3b82f6; color: white; }
 
-        /* Map */
         #probe-map-container { width: 100%; height: 500px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); overflow: hidden; border: 1px solid #e5e7eb; background-color: #b1c2d4; background-image: linear-gradient(rgba(255,255,255,0.2) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.2) 1px, transparent 1px); background-size: 20px 20px; z-index: 1;}
         .probe-custom-map-badge div { background-color: #10b981; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
 
-        /* Detail View */
         .probe-header-card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
         .probe-info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; font-size: 14px; }
         .probe-charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
@@ -80,59 +77,58 @@
         .probe-chart-full { grid-column: 1 / -1; }
         .probe-chart-full canvas { max-height: 250px !important; }
 
-        /* 原生经典主题支持 */
-        body.theme2 { background-color: #0d1117; color: #c9d1d9; }
-        body.theme2 .probe-vps-card, body.theme2 .probe-global-stats, body.theme2 .probe-header-card, body.theme2 .probe-chart-card { background: #161b22; color: #c9d1d9; box-shadow: 0 4px 6px rgba(0,0,0,0.4); border: 1px solid #30363d; }
-        body.theme2 .probe-vps-card:hover { border-color: #8b949e; }
-        body.theme2 .probe-group-header { color: #58a6ff; border-left-color: #58a6ff; }
-        body.theme2 .probe-g-val, body.theme2 .probe-card-title { color: #fff; }
-        body.theme2 .probe-g-label, body.theme2 .probe-g-sub, body.theme2 .probe-card-meta { color: #8b949e; }
-        body.theme2 .probe-stat-bar-full { background: #21262d; }
-        body.theme2 .probe-view-controls { background: #0d1117; border: 1px solid #30363d; }
-        body.theme2 .probe-toggle-btn { color: #8b949e; } body.theme2 .probe-toggle-btn.active { background: #21262d; color: #58a6ff; border: 1px solid #30363d; }
-        body.theme2 .probe-custom-table, body.theme2 .probe-filter-tag { background: #161b22; color: #c9d1d9; border: 1px solid #30363d; }
-        body.theme2 .probe-custom-table th { background: #0d1117; color: #8b949e; border-bottom-color: #30363d; }
-        body.theme2 .probe-custom-table td { border-bottom-color: #30363d; } body.theme2 .probe-custom-table tr:hover { background: #21262d; }
-        body.theme2 .probe-stat-subtext { color: rgba(255,255,255,0.6); }
-        body.theme2 #probe-map-container { background-color: #0d1117; border-color: #30363d; background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px); }
+        .theme2 { background-color: #0d1117; color: #c9d1d9; }
+        .theme2 .probe-vps-card, .theme2 .probe-global-stats, .theme2 .probe-header-card, .theme2 .probe-chart-card { background: #161b22; color: #c9d1d9; box-shadow: 0 4px 6px rgba(0,0,0,0.4); border: 1px solid #30363d; }
+        .theme2 .probe-vps-card:hover { border-color: #8b949e; }
+        .theme2 .probe-group-header { color: #58a6ff; border-left-color: #58a6ff; }
+        .theme2 .probe-g-val, .theme2 .probe-card-title { color: #fff; }
+        .theme2 .probe-g-label, .theme2 .probe-g-sub, .theme2 .probe-card-meta { color: #8b949e; }
+        .theme2 .probe-stat-bar-full { background: #21262d; }
+        .theme2 .probe-view-controls { background: #0d1117; border: 1px solid #30363d; }
+        .theme2 .probe-toggle-btn { color: #8b949e; } .theme2 .probe-toggle-btn.active { background: #21262d; color: #58a6ff; border: 1px solid #30363d; }
+        .theme2 .probe-custom-table, .theme2 .probe-filter-tag { background: #161b22; color: #c9d1d9; border: 1px solid #30363d; }
+        .theme2 .probe-custom-table th { background: #0d1117; color: #8b949e; border-bottom-color: #30363d; }
+        .theme2 .probe-custom-table td { border-bottom-color: #30363d; } .theme2 .probe-custom-table tr:hover { background: #21262d; }
+        .theme2 .probe-stat-subtext { color: rgba(255,255,255,0.6); }
+        .theme2 #probe-map-container { background-color: #0d1117; border-color: #30363d; background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px); }
 
-        body.theme3 { background-color: #fef08a; color: #000; font-weight: 500; }
-        body.theme3 .probe-vps-card, body.theme3 .probe-global-stats, body.theme3 .probe-header-card, body.theme3 .probe-chart-card { background: #fff; border: 3px solid #000; border-radius: 0; box-shadow: 6px 6px 0px #000; transition: transform 0.1s, box-shadow 0.1s; }
-        body.theme3 .probe-vps-card:hover { transform: translate(2px, 2px); box-shadow: 4px 4px 0px #000; border-color: #000; }
-        body.theme3 .probe-group-header { color: #000; border-left: none; border-bottom: 4px solid #000; padding-left: 0; display: inline-block; font-size: 22px; font-weight: 900; text-transform: uppercase; }
-        body.theme3 .probe-stat-bar-full { background: #e5e5e5; border: 1px solid #000; }
-        body.theme3 .probe-stat-bar-full > div { border-right: 1px solid #000; }
-        body.theme3 .probe-badge { border: 1px solid #000; border-radius: 0; }
-        body.theme3 .probe-g-val, body.theme3 .probe-card-title { font-weight: 900; color: #000; }
-        body.theme3 .probe-custom-table, body.theme3 .probe-filter-tag { background: #fff; border: 3px solid #000; border-radius: 0; box-shadow: 6px 6px 0px #000; }
+        .theme3 { background-color: #fef08a; color: #000; font-weight: 500; }
+        .theme3 .probe-vps-card, .theme3 .probe-global-stats, .theme3 .probe-header-card, .theme3 .probe-chart-card { background: #fff; border: 3px solid #000; border-radius: 0; box-shadow: 6px 6px 0px #000; transition: transform 0.1s, box-shadow 0.1s; }
+        .theme3 .probe-vps-card:hover { transform: translate(2px, 2px); box-shadow: 4px 4px 0px #000; border-color: #000; }
+        .theme3 .probe-group-header { color: #000; border-left: none; border-bottom: 4px solid #000; padding-left: 0; display: inline-block; font-size: 22px; font-weight: 900; text-transform: uppercase; }
+        .theme3 .probe-stat-bar-full { background: #e5e5e5; border: 1px solid #000; }
+        .theme3 .probe-stat-bar-full > div { border-right: 1px solid #000; }
+        .theme3 .probe-badge { border: 1px solid #000; border-radius: 0; }
+        .theme3 .probe-g-val, .theme3 .probe-card-title { font-weight: 900; color: #000; }
+        .theme3 .probe-custom-table, .theme3 .probe-filter-tag { background: #fff; border: 3px solid #000; border-radius: 0; box-shadow: 6px 6px 0px #000; }
 
-        body.theme4 { background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%); background-attachment: fixed; color: #fff; }
-        body.theme4 .probe-vps-card, body.theme4 .probe-global-stats, body.theme4 .probe-header-card, body.theme4 .probe-chart-card { background: rgba(255, 255, 255, 0.2); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.4); box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1); color: #fff; }
-        body.theme4 .probe-vps-card:hover { background: rgba(255, 255, 255, 0.3); border-color: rgba(255, 255, 255, 0.8); }
-        body.theme4 .probe-group-header { color: #fff; border-left-color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-        body.theme4 .probe-g-val, body.theme4 .probe-card-title { color: #fff; }
-        body.theme4 .probe-g-label, body.theme4 .probe-g-sub, body.theme4 .probe-card-meta { color: rgba(255,255,255,0.8); }
-        body.theme4 .probe-stat-bar-full { background: rgba(0,0,0,0.2); }
-        body.theme4 .probe-custom-table, body.theme4 .probe-filter-tag { background: rgba(255, 255, 255, 0.2); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.4); box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1); color: #fff; }
-        body.theme4 .probe-custom-table th, body.theme4 .probe-custom-table tr:hover { background: rgba(0,0,0,0.1); color:#fff;}
-        body.theme4 .probe-stat-subtext { color: rgba(255,255,255,0.6); }
+        .theme4 { background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%); background-attachment: fixed; color: #fff; }
+        .theme4 .probe-vps-card, .theme4 .probe-global-stats, .theme4 .probe-header-card, .theme4 .probe-chart-card { background: rgba(255, 255, 255, 0.2); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.4); box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1); color: #fff; }
+        .theme4 .probe-vps-card:hover { background: rgba(255, 255, 255, 0.3); border-color: rgba(255, 255, 255, 0.8); }
+        .theme4 .probe-group-header { color: #fff; border-left-color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        .theme4 .probe-g-val, .theme4 .probe-card-title { color: #fff; }
+        .theme4 .probe-g-label, .theme4 .probe-g-sub, .theme4 .probe-card-meta { color: rgba(255,255,255,0.8); }
+        .theme4 .probe-stat-bar-full { background: rgba(0,0,0,0.2); }
+        .theme4 .probe-custom-table, .theme4 .probe-filter-tag { background: rgba(255, 255, 255, 0.2); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.4); box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1); color: #fff; }
+        .theme4 .probe-custom-table th, .theme4 .probe-custom-table tr:hover { background: rgba(0,0,0,0.1); color:#fff;}
+        .theme4 .probe-stat-subtext { color: rgba(255,255,255,0.6); }
 
-        body.theme5 { background-color: #050505; color: #0ff; font-family: 'Courier New', Courier, monospace; }
-        body.theme5 .probe-vps-card, body.theme5 .probe-global-stats, body.theme5 .probe-header-card, body.theme5 .probe-chart-card { background: #0b0c10; border: 1px solid #f0f; border-radius: 0; box-shadow: 0 0 10px rgba(255, 0, 255, 0.2); color: #fff; }
-        body.theme5 .probe-vps-card:hover { box-shadow: 0 0 20px rgba(0, 255, 255, 0.5); border-color: #0ff; }
-        body.theme5 .probe-group-header { color: #f0f; border-left: 5px solid #0ff; text-shadow: 0 0 5px #f0f; }
-        body.theme5 .probe-g-val, body.theme5 .probe-card-title { color: #0ff; text-shadow: 0 0 5px #0ff; }
-        body.theme5 .probe-g-label, body.theme5 .probe-g-sub, body.theme5 .probe-card-meta { color: #f0f; }
-        body.theme5 .probe-stat-bar-full { background: #222; border: 1px solid #f0f; border-radius: 0; }
-        body.theme5 .probe-stat-bar-full > div { background: #0ff !important; box-shadow: 0 0 10px #0ff; border-radius: 0; }
-        body.theme5 .probe-badge-bw { background: #f0f; box-shadow: 0 0 5px #f0f; } body.theme5 .probe-badge-tf { background: #0ff; color:#000; box-shadow: 0 0 5px #0ff; }
-        body.theme5 .probe-custom-table, body.theme5 .probe-filter-tag { background: #0b0c10; border: 1px solid #f0f; border-radius: 0; box-shadow: 0 0 10px rgba(255, 0, 255, 0.2); color: #fff; }
-        body.theme5 .probe-custom-table th { background: #111; color: #f0f; border-color: #333; } body.theme5 .probe-custom-table td { border-color: #333; } body.theme5 .probe-custom-table tr:hover { background: #222; }
-        body.theme5 .probe-stat-subtext { color: rgba(255,255,255,0.6); }
-        body.theme5 #probe-map-container { background-color: #0d1117; border-color: #30363d; background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px); }
+        .theme5 { background-color: #050505; color: #0ff; font-family: 'Courier New', Courier, monospace; }
+        .theme5 .probe-vps-card, .theme5 .probe-global-stats, .theme5 .probe-header-card, .theme5 .probe-chart-card { background: #0b0c10; border: 1px solid #f0f; border-radius: 0; box-shadow: 0 0 10px rgba(255, 0, 255, 0.2); color: #fff; }
+        .theme5 .probe-vps-card:hover { box-shadow: 0 0 20px rgba(0, 255, 255, 0.5); border-color: #0ff; }
+        .theme5 .probe-group-header { color: #f0f; border-left: 5px solid #0ff; text-shadow: 0 0 5px #f0f; }
+        .theme5 .probe-g-val, .theme5 .probe-card-title { color: #0ff; text-shadow: 0 0 5px #0ff; }
+        .theme5 .probe-g-label, .theme5 .probe-g-sub, .theme5 .probe-card-meta { color: #f0f; }
+        .theme5 .probe-stat-bar-full { background: #222; border: 1px solid #f0f; border-radius: 0; }
+        .theme5 .probe-stat-bar-full > div { background: #0ff !important; box-shadow: 0 0 10px #0ff; border-radius: 0; }
+        .theme5 .probe-badge-bw { background: #f0f; box-shadow: 0 0 5px #f0f; } .theme5 .probe-badge-tf { background: #0ff; color:#000; box-shadow: 0 0 5px #0ff; }
+        .theme5 .probe-custom-table, .theme5 .probe-filter-tag { background: #0b0c10; border: 1px solid #f0f; border-radius: 0; box-shadow: 0 0 10px rgba(255, 0, 255, 0.2); color: #fff; }
+        .theme5 .probe-custom-table th { background: #111; color: #f0f; border-color: #333; } .theme5 .probe-custom-table td { border-color: #333; } .theme5 .probe-custom-table tr:hover { background: #222; }
+        .theme5 .probe-stat-subtext { color: rgba(255,255,255,0.6); }
+        .theme5 #probe-map-container { background-color: #0d1117; border-color: #30363d; background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px); }
     </style>
 </head>
-<body id="main-body">
+<body id="main-body" class="theme1">
     
     <div id="app" v-cloak>
         <div v-if="!isLoggedIn || activeTab === 'probe'" class="probe-body">
@@ -327,6 +323,7 @@
                 <div class="flex flex-wrap justify-center lg:justify-end items-center gap-2 w-full lg:w-auto">
                     <span class="text-[10px] md:text-xs font-bold text-emerald-500 bg-emerald-100/50 px-3 py-2 rounded-full border border-emerald-200 animate-pulse">🟢 实时监控中</span>
                     <button v-if="role === 'admin'" @click="copyCommand(generateSubLink(''), '全量聚合订阅已复制！')" class="bg-gradient-to-r from-indigo-500 to-purple-500 text-white px-4 py-2 rounded-full text-xs font-bold shadow-md hover:scale-105 active:scale-95 transition-all">🔗 复制订阅</button>
+                    <button v-if="role === 'admin'" @click="showQrCode(generateSubLink(''))" class="bg-gradient-to-r from-blue-500 to-cyan-500 text-white px-4 py-2 rounded-full text-xs font-bold shadow-md hover:scale-105 active:scale-95 transition-all">📱 二维码</button>
                     <button @click="refreshData" class="bg-white/50 hover:bg-white/80 border border-slate-200 px-4 py-2 rounded-full text-xs font-medium transition-all shadow-sm">🔄 刷新</button>
                     <button @click="logout" class="text-rose-500 hover:bg-rose-50 px-4 py-2 rounded-full text-xs font-bold transition-all border border-transparent hover:border-rose-200">退出</button>
                 </div>
@@ -463,9 +460,34 @@
                 </div>
             </div>
 
+            <div v-if="role === 'user' && activeTab === 'dashboard'" class="space-y-8">
+                <div class="bg-white/60 backdrop-blur-xl p-10 md:p-16 rounded-[3rem] shadow-2xl border border-white text-center relative overflow-hidden">
+                    <div class="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-lg h-32 bg-indigo-400/20 blur-3xl rounded-full pointer-events-none"></div>
+                    <h2 class="text-4xl md:text-5xl font-black mb-3 text-slate-800 relative z-10">Hi, {{ currentUser }} 👋</h2>
+                    <p class="text-slate-500 mb-10 font-medium relative z-10">欢迎来到您的专属网络服务中心</p>
+                    <div class="max-w-md mx-auto bg-white/80 p-8 rounded-[2rem] border border-white shadow-xl shadow-slate-200/50 mb-10 relative z-10">
+                        <div class="flex justify-between text-sm font-black text-slate-700 mb-3"><span>已用流量: {{ formatBytes(users[0]?.traffic_used || 0) }}</span><span class="text-indigo-600">总量: {{ users[0]?.traffic_limit > 0 ? formatBytes(users[0].traffic_limit) : '无限制' }}</span></div>
+                        <div class="w-full bg-slate-100 rounded-full h-3 overflow-hidden shadow-inner mb-4"><div :class="users[0]?.traffic_used >= users[0]?.traffic_limit && users[0]?.traffic_limit > 0 ? 'bg-rose-500' : 'bg-gradient-to-r from-blue-400 to-indigo-500'" class="h-3 transition-all duration-1000 rounded-full" :style="{ width: getTrafficPercent(users[0]?.traffic_used||0, users[0]?.traffic_limit||0) + '%' }"></div></div>
+                        <div class="flex justify-between mt-4 pt-4 border-t border-slate-100 text-xs text-slate-500 font-medium"><span>账户状态: <span :class="users[0]?.enable === 1 ? 'text-emerald-500 font-bold bg-emerald-50 px-2 py-1 rounded' : 'text-rose-500 font-bold bg-rose-50 px-2 py-1 rounded'">{{ users[0]?.enable === 1 ? '🟢 正常运行' : '🔴 已被封禁' }}</span></span><span>到期时间: <span class="font-bold text-slate-700">{{ formatDate(users[0]?.expire_time) }}</span></span></div>
+                    </div>
+                    <div class="flex flex-col md:flex-row justify-center gap-4 relative z-10">
+                        <button @click="copyCommand(generateSubLink(''), '聚合链接已复制！')" class="bg-gradient-to-r from-slate-800 to-black text-white font-black py-4 px-8 rounded-full shadow-2xl transition-all transform hover:scale-105 active:scale-95 text-lg">🔗 一键复制专属订阅</button>
+                        <button @click="showQrCode(generateSubLink(''))" class="bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-black py-4 px-8 rounded-full shadow-2xl transition-all transform hover:scale-105 active:scale-95 text-lg">📱 显示二维码</button>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="font-black text-xl mb-6 text-slate-700 px-4">📍 我已开通的节点</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div v-for="node in nodes" :key="node.id" class="bg-white/70 backdrop-blur-xl p-6 rounded-[2rem] border border-white shadow-lg transition-all hover:-translate-y-1">
+                            <div class="font-black text-xl mb-4 text-slate-800">{{ getVpsName(node.vps_ip) }}</div>
+                            <div class="flex justify-between items-center"><span class="font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-xl text-xs">{{ node.protocol }}</span><span class="text-xs font-mono font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-xl">PORT: {{ node.port }}</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div v-if="activeTab === 'settings'" class="space-y-6">
                 <template v-if="role === 'admin'">
-                    
                     <div class="bg-white/60 backdrop-blur-xl p-8 rounded-[2.5rem] border border-white shadow-xl shadow-slate-200/40">
                         <h3 class="text-xl font-black text-slate-800 mb-6 flex items-center gap-2">⚙️ KUI 代理系统参数</h3>
                         <div class="max-w-md mb-6">
@@ -489,7 +511,7 @@
                                         <option value="theme1">1. 默认清爽白 (Classic)</option><option value="theme2">2. 暗黑极客 (Dark)</option><option value="theme3">3. 新粗野主义 (Brutalism)</option><option value="theme4">4. 动态渐变毛玻璃 (Glass)</option><option value="theme5">5. 赛博朋克 (Cyberpunk)</option><option value="theme6">6. 完全自定义 CSS</option>
                                     </select>
                                 </div>
-                                <div><label class="block text-xs font-bold text-slate-500 mb-1">自定义 CSS 代码</label><textarea v-model="probeSys.custom_css" rows="3" class="w-full bg-white/50 border p-2.5 rounded-xl text-sm font-mono"></textarea></div>
+                                <div v-if="probeSys.theme === 'theme6'"><label class="block text-xs font-bold text-slate-500 mb-1">自定义 CSS 代码</label><textarea v-model="probeSys.custom_css" rows="3" class="w-full bg-white/50 border p-2.5 rounded-xl text-sm font-mono"></textarea></div>
                                 <div><label class="block text-xs font-bold text-slate-500 mb-1">自定义背景图片 URL (清空恢复纯色)</label><input v-model="probeSys.custom_bg" class="w-full bg-white/50 border p-2.5 rounded-xl text-sm font-medium text-slate-700"></div>
                                 <div><label class="block text-xs font-bold text-slate-500 mb-1">自定义 &lt;head&gt; 注入</label><textarea v-model="probeSys.custom_head" rows="2" class="w-full bg-white/50 border p-2.5 rounded-xl text-sm font-mono"></textarea></div>
                                 <div><label class="block text-xs font-bold text-slate-500 mb-1">自定义底部 Script 注入</label><textarea v-model="probeSys.custom_script" rows="2" class="w-full bg-white/50 border p-2.5 rounded-xl text-sm font-mono"></textarea></div>
@@ -579,6 +601,18 @@
             </div>
         </div>
 
+        <div v-if="qrModalOpen" class="fixed inset-0 z-[300] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" @click.self="qrModalOpen = false">
+            <div class="bg-white rounded-3xl p-8 shadow-2xl w-full max-w-sm relative text-center">
+                <button @click="qrModalOpen = false" class="absolute top-4 right-5 text-2xl text-slate-400 hover:text-slate-600">&times;</button>
+                <h3 class="text-xl font-black text-slate-800 mb-2">订阅二维码</h3>
+                <p class="text-xs text-slate-500 mb-6">请使用 v2rayN、Shadowrocket 等客户端扫描</p>
+                <div class="flex justify-center bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <img :src="qrCodeImage" alt="QR Code" class="w-48 h-48 object-contain rounded-xl">
+                </div>
+                <button @click="qrModalOpen = false" class="mt-6 w-full bg-slate-800 text-white px-4 py-3 rounded-xl font-bold hover:bg-black transition-all">关 闭</button>
+            </div>
+        </div>
+
     </div>
 
     <script>
@@ -616,6 +650,10 @@
 
                 const adminProbeServers = ref([]);
                 const probeEditModalOpen = ref(false); const editingProbeNode = ref({});
+                
+                // 二维码状态
+                const qrModalOpen = ref(false);
+                const qrCodeImage = ref('');
 
                 watch(activeTab, (val) => localStorage.setItem('monitor_preferred_tab', val));
                 watch(probeView, (val) => localStorage.setItem('monitor_preferred_view', val));
@@ -859,6 +897,14 @@
                 const generateSubLink = (ip='') => { const tokenToUse = mySubToken.value || authKey.value; return `${currentDomain}/api/sub?user=${currentUser.value}&token=${tokenToUse}${ip?`&ip=${ip}`:''}`; };
                 const copyCommand = (txt, msg) => navigator.clipboard.writeText(txt).then(() => alert(msg));
 
+                // 🌟 显示二维码方法
+                const showQrCode = async (text) => {
+                    try {
+                        qrCodeImage.value = await QRCode.toDataURL(text, { width: 300, margin: 2, color: { dark: '#1e293b', light: '#ffffff' } });
+                        qrModalOpen.value = true;
+                    } catch (err) { alert('生成二维码失败！'); }
+                };
+
                 // --- 探针后台管理交互 ---
                 const saveProbeSettings = async () => { await fetchApi('/api/probe/admin/settings', { method: 'POST', body: JSON.stringify({settings: probeSys}) }); alert('✅ 探针大盘配置已生效！'); refreshData(); fetchProbeData(); };
                 const openProbeEditModal = (s) => { editingProbeNode.value = JSON.parse(JSON.stringify(s)); if(!editingProbeNode.value.is_hidden) editingProbeNode.value.is_hidden = 'false'; probeEditModalOpen.value = true; };
@@ -890,7 +936,8 @@
                     getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateSubLink, copyCommand, 
                     globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, saveSiteTitle, userNewPassword, updateUserPassword, resetMySubLink, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,
                     probeSys, publicProbeServers, probeView, probeDetailId, probeDetail, setProbeView, openProbeDetail, probeGlobalOnline, probeGlobalOffline, probeGlobalSpeedIn, probeGlobalSpeedOut, probeGlobalNetRx, probeGlobalNetTx, probeGroups, probeCountryStats,
-                    saveProbeSettings, adminProbeServers, probeEditModalOpen, editingProbeNode, openProbeEditModal, saveProbeEdit, deleteProbeNode, currentDomain
+                    saveProbeSettings, adminProbeServers, probeEditModalOpen, editingProbeNode, openProbeEditModal, saveProbeEdit, deleteProbeNode, currentDomain,
+                    qrModalOpen, qrCodeImage, showQrCode
                 };
             }
         }).mount('#app');
