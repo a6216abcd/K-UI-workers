@@ -1,6 +1,6 @@
 // ==========================================
 // KUI Serverless 聚合网关后端 - 精简核心版
-// (包含：自动建表升级 + 极速8合1协议生成 + 探针管理 + Clash订阅)
+// (包含：自动建表升级 + 极速8合1协议生成 + 探针管理 + Clash订阅 + 动态云端测速/主题)
 // ==========================================
 
 async function sha256(text) {
@@ -39,6 +39,18 @@ async function ensureDbSchema(db) {
     try { await db.prepare("SELECT disk FROM servers LIMIT 1").first(); } catch (e) { const newCols = ['disk INTEGER DEFAULT 0', 'load TEXT DEFAULT ""', 'uptime TEXT DEFAULT ""', 'net_in_speed INTEGER DEFAULT 0', 'net_out_speed INTEGER DEFAULT 0', 'tcp_conn INTEGER DEFAULT 0', 'udp_conn INTEGER DEFAULT 0']; for (let col of newCols) { try { await db.prepare(`ALTER TABLE servers ADD COLUMN ${col}`).run(); } catch(err){} } }
     try { await db.prepare("SELECT sub_token FROM users LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE users ADD COLUMN sub_token TEXT").run(); } catch(err){} }
     try { await db.prepare("SELECT reset_day FROM probe_servers LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE probe_servers ADD COLUMN reset_day TEXT DEFAULT '1'").run(); } catch(e){} }
+
+    // 初始化云端测速数据
+    const checkNodes = await db.prepare("SELECT value FROM probe_settings WHERE key = 'cached_nodes_data'").first();
+    if (!checkNodes) {
+        try {
+            const res = await fetch('https://raw.githubusercontent.com/a63414262/CF-Server-Monitor-Pro/refs/heads/main/nodes.json');
+            if (res.ok) {
+                const dataText = await res.text();
+                await db.prepare("INSERT INTO probe_settings (key, value) VALUES ('cached_nodes_data', ?)").bind(dataText).run();
+            }
+        } catch(e) {}
+    }
 }
 
 async function verifyAuth(authHeader, db, env) {
@@ -128,7 +140,7 @@ async function handleProbeAPI(request, env, context, pathArray) {
     }
 
     if (method === 'GET' && subPath === 'public') {
-        const settings = { theme: 'theme1', is_public: 'true', site_title: '⚡ Server Monitor Pro', show_price: 'true', show_expire: 'true', show_bw: 'true', show_tf: 'true', custom_css: '', custom_bg: '', custom_head: '', custom_script: '', report_interval: '5', enable_popup: 'false', popup_content: '' };
+        const settings = { theme: 'theme1', is_public: 'true', site_title: '⚡ Server Monitor Pro', show_price: 'true', show_expire: 'true', show_bw: 'true', show_tf: 'true', custom_css: '', custom_bg: '', custom_head: '', custom_script: '', report_interval: '5', enable_popup: 'false', popup_content: '', cached_nodes_data: '' };
         try { const { results } = await db.prepare('SELECT * FROM probe_settings').all(); if (results) results.forEach(r => settings[r.key] = r.value); } catch(e){}
         
         const isAjax = url.searchParams.get('ajax') === '1';
@@ -157,6 +169,19 @@ async function handleProbeAPI(request, env, context, pathArray) {
 
     if (!(await verifyAuth(request.headers.get("Authorization"), db, env))) return Response.json({error: "Unauthorized"}, {status: 401});
 
+    // 🌟 GitHub 云端拉取三网节点库
+    if (method === 'POST' && subPath === 'admin/pull_github') {
+        try {
+            const res = await fetch('https://raw.githubusercontent.com/a63414262/CF-Server-Monitor-Pro/refs/heads/main/nodes.json');
+            if (res.ok) {
+                const dataText = await res.text();
+                await db.prepare("INSERT INTO probe_settings (key, value) VALUES ('cached_nodes_data', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(dataText).run();
+                return Response.json({ success: true });
+            }
+            return Response.json({ error: 'Fetch failed' }, { status: 400 });
+        } catch (e) { return Response.json({ error: e.message }, { status: 400 }); }
+    }
+
     if (method === 'GET' && subPath === 'admin/data') {
         const settings = {};
         try { const { results } = await db.prepare('SELECT * FROM probe_settings').all(); if (results) results.forEach(r => settings[r.key] = r.value); } catch(e){}
@@ -167,7 +192,6 @@ async function handleProbeAPI(request, env, context, pathArray) {
     if (method === 'POST' && subPath === 'admin/settings') {
         const { settings } = await request.json();
         for (const [k, v] of Object.entries(settings)) { await db.prepare('INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(k, v).run(); }
-        // 自动绑定 TG Webhook
         if (settings.tg_bot_token) {
             try {
                await fetch(`https://api.telegram.org/bot${settings.tg_bot_token}/setWebhook`, {
@@ -214,7 +238,7 @@ export async function onRequest(context) {
         return Response.json({ success: true });
     }
 
-    // 🌟 Agent 统一探针与管理上报接口 (融入全新的 Reset Day 计算)
+    // 🌟 Agent 统一探针与管理上报接口 (融入全新的 Reset Day 计算和动态云端测速节点)
     if (action === "report" && method === "POST") {
         if (!(await verifyAuth(request.headers.get("Authorization"), db, env))) return new Response("Unauthorized", { status: 401 });
         const data = await request.json(); 
@@ -319,10 +343,20 @@ export async function onRequest(context) {
         
         let fastMode = false; try { const uiActive = await db.prepare("SELECT ts FROM sys_config WHERE key = 'ui_active'").first(); if (uiActive && (nowMs - uiActive.ts < 20000)) fastMode = true; } catch(e) {}
         
-        let reportInterval = 5;
-        try { const r = await db.prepare("SELECT value FROM probe_settings WHERE key = 'report_interval'").first(); if (r && r.value) reportInterval = parseInt(r.value); } catch(e) {}
+        let reportInterval = 5; let pingCt = 'default'; let pingCu = 'default'; let pingCm = 'default';
+        try { 
+            const { results } = await db.prepare("SELECT key, value FROM probe_settings WHERE key IN ('report_interval', 'ping_node_ct', 'ping_node_cu', 'ping_node_cm')").all(); 
+            if (results) {
+                results.forEach(r => {
+                    if (r.key === 'report_interval') reportInterval = parseInt(r.value) || 5;
+                    if (r.key === 'ping_node_ct') pingCt = r.value;
+                    if (r.key === 'ping_node_cu') pingCu = r.value;
+                    if (r.key === 'ping_node_cm') pingCm = r.value;
+                });
+            }
+        } catch(e) {}
         
-        return Response.json({ success: true, fast_mode: fastMode, interval: reportInterval });
+        return Response.json({ success: true, fast_mode: fastMode, interval: reportInterval, ping_ct: pingCt, ping_cu: pingCu, ping_cm: pingCm });
     }
 
     if (action === "config" && method === "GET") {
