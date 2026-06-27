@@ -1,6 +1,6 @@
 // ==========================================
-// KUI Serverless 聚合网关后端 - 完美融合版
-// (包含：自动建表 + 极速8合1协议生成 + CF Monitor Pro API化子系统 + Clash订阅自适应支持)
+// KUI Serverless 聚合网关后端 - 完美融合增强版
+// (包含：自动建表升级 + 极速8合1协议生成 + CF Monitor Pro 全量特性集成 + Clash订阅)
 // ==========================================
 
 async function sha256(text) {
@@ -21,6 +21,7 @@ async function ensureDbSchema(db) {
 
     const probeQueries = [
         `CREATE TABLE IF NOT EXISTS probe_settings (key TEXT PRIMARY KEY, value TEXT)`,
+        `CREATE TABLE IF NOT EXISTS probe_peers (domain TEXT PRIMARY KEY, server_count INTEGER DEFAULT 0, total_asset REAL DEFAULT 0, version INTEGER DEFAULT 0, last_seen INTEGER DEFAULT 0)`,
         `CREATE TABLE IF NOT EXISTS probe_servers (
             id TEXT PRIMARY KEY, name TEXT, cpu TEXT, ram TEXT, disk TEXT, load_avg TEXT, uptime TEXT, last_updated INTEGER,
             ram_total TEXT, net_rx TEXT, net_tx TEXT, net_in_speed TEXT, net_out_speed TEXT,
@@ -30,7 +31,7 @@ async function ensureDbSchema(db) {
             expire_date TEXT DEFAULT '', bandwidth TEXT DEFAULT '', traffic_limit TEXT DEFAULT '', agent_os TEXT DEFAULT 'debian',
             ping_ct TEXT DEFAULT '0', ping_cu TEXT DEFAULT '0', ping_cm TEXT DEFAULT '0', ping_bd TEXT DEFAULT '0',
             monthly_rx TEXT DEFAULT '0', monthly_tx TEXT DEFAULT '0', last_rx TEXT DEFAULT '0', last_tx TEXT DEFAULT '0', 
-            reset_month TEXT DEFAULT '', history TEXT DEFAULT '{}', is_hidden TEXT DEFAULT 'false', virt TEXT DEFAULT ''
+            reset_month TEXT DEFAULT '', history TEXT DEFAULT '{}', is_hidden TEXT DEFAULT 'false', virt TEXT DEFAULT '', reset_day TEXT DEFAULT '1'
         )`
     ];
     for (let query of probeQueries) { try { await db.prepare(query).run(); } catch (e) {} }
@@ -38,6 +39,7 @@ async function ensureDbSchema(db) {
     try { await db.prepare("SELECT username FROM nodes LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE nodes ADD COLUMN username TEXT DEFAULT 'admin'").run(); } catch(e){} }
     try { await db.prepare("SELECT disk FROM servers LIMIT 1").first(); } catch (e) { const newCols = ['disk INTEGER DEFAULT 0', 'load TEXT DEFAULT ""', 'uptime TEXT DEFAULT ""', 'net_in_speed INTEGER DEFAULT 0', 'net_out_speed INTEGER DEFAULT 0', 'tcp_conn INTEGER DEFAULT 0', 'udp_conn INTEGER DEFAULT 0']; for (let col of newCols) { try { await db.prepare(`ALTER TABLE servers ADD COLUMN ${col}`).run(); } catch(err){} } }
     try { await db.prepare("SELECT sub_token FROM users LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE users ADD COLUMN sub_token TEXT").run(); } catch(err){} }
+    try { await db.prepare("SELECT reset_day FROM probe_servers LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE probe_servers ADD COLUMN reset_day TEXT DEFAULT '1'").run(); } catch(e){} }
 }
 
 async function verifyAuth(authHeader, db, env) {
@@ -61,7 +63,7 @@ async function verifyAuth(authHeader, db, env) {
 }
 
 // ==============================================
-// 探针纯净 API 子系统处理
+// 探针纯净 API 子系统处理 (整合了排行与Gossip协议)
 // ==============================================
 async function handleProbeAPI(request, env, context, pathArray) {
     const subPath = pathArray ? pathArray.join('/') : '';
@@ -69,8 +71,101 @@ async function handleProbeAPI(request, env, context, pathArray) {
     const method = request.method;
     const db = env.DB;
 
+    // 内部排行 API
+    if (method === 'GET' && subPath === 'rank') {
+        const nowMs = Date.now();
+        await db.prepare("DELETE FROM probe_peers WHERE last_seen < ? AND last_seen > 0").bind(nowMs - 86400000).run();
+        const { results: rankData } = await db.prepare('SELECT domain, server_count as servers, total_asset as assets, last_seen FROM probe_peers ORDER BY total_asset DESC, server_count DESC LIMIT 100').all();
+        
+        let asset_rank = 0; let server_rank = 0; let global_servers = 0; let global_assets = 0;
+        rankData.forEach(r => { global_servers += parseInt(r.servers) || 0; global_assets += parseFloat(r.assets) || 0; });
+        
+        const myDomain = url.hostname;
+        const sortedByAsset = [...rankData].sort((a,b) => b.assets - a.assets);
+        const sortedByServer = [...rankData].sort((a,b) => b.servers - a.servers);
+        asset_rank = sortedByAsset.findIndex(r => r.domain === myDomain) + 1;
+        server_rank = sortedByServer.findIndex(r => r.domain === myDomain) + 1;
+        
+        return Response.json({ list: rankData, server_rank: server_rank > 0 ? server_rank : '-', asset_rank: asset_rank > 0 ? asset_rank : '-', global_servers, global_assets, timestamp: nowMs });
+    }
+
+    // Gossip 网络互联同步入口
+    if (method === 'POST' && subPath === 'gossip') {
+        try {
+            const payload = await request.json();
+            if (!payload.domain || !payload.version) return new Response('Bad Request', {status: 400});
+            await db.prepare(`
+              INSERT INTO probe_peers (domain, server_count, total_asset, version, last_seen) VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT(domain) DO UPDATE SET server_count = excluded.server_count, total_asset = excluded.total_asset, version = excluded.version, last_seen = excluded.last_seen WHERE excluded.version > probe_peers.version
+            `).bind(payload.domain, payload.server_count || 0, payload.total_asset || 0, payload.version, Date.now()).run();
+            if (Array.isArray(payload.known_peers)) {
+                for (const peerDomain of payload.known_peers.slice(0, 10)) {
+                    if (peerDomain !== url.hostname) await db.prepare('INSERT OR IGNORE INTO probe_peers (domain, server_count, total_asset, version, last_seen) VALUES (?, 0, 0, 0, 0)').bind(peerDomain).run();
+                }
+            }
+            return new Response('Gossip Synced', {status: 200});
+        } catch (e) { return new Response('Gossip Error', {status: 500}); }
+    }
+
+    // Telegram Bot 交互回调控制
+    if (method === 'POST' && subPath === 'tg_webhook') {
+        try {
+            const body = await request.json();
+            const message = body.message; const callback_query = body.callback_query;
+            let tgBotToken = ''; let tgChatId = '';
+            try { const { results } = await db.prepare("SELECT key, value FROM probe_settings WHERE key IN ('tg_bot_token', 'tg_chat_id')").all(); results.forEach(r => { if(r.key === 'tg_bot_token') tgBotToken = r.value; if(r.key === 'tg_chat_id') tgChatId = r.value; }); } catch(e){}
+            
+            const tgSend = async (chatId, text, kb=null) => { const p = { chat_id: chatId, text, parse_mode: 'HTML' }; if (kb) p.reply_markup = kb; await fetch(`https://api.telegram.org/bot${tgBotToken}/sendMessage`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(p)}); };
+            const tgEdit = async (chatId, msgId, text, kb=null) => { const p = { chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML' }; if (kb) p.reply_markup = kb; await fetch(`https://api.telegram.org/bot${tgBotToken}/editMessageText`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(p)}); };
+
+            let chatId, text, msgId;
+            if (message) { chatId = message.chat.id.toString(); text = message.text || ''; msgId = message.message_id; } 
+            else if (callback_query) { chatId = callback_query.message.chat.id.toString(); text = callback_query.data; msgId = callback_query.message.message_id; }
+            if (chatId !== tgChatId) return new Response('OK', { status: 200 });
+
+            const mainMenuText = `🖥 <b>Server Monitor Pro 探针管理</b>\n\n您可以使用命令快速设置系统：\n<code>/set_interval 10</code> - 上报间隔10秒\n<code>/set_sitetitle 新标题</code> - 更改大盘标题\n<code>/menu</code> - 调出本菜单`;
+            const mainMenuKb = { inline_keyboard: [ [{text: '📋 探针节点列表', callback_data: 'cb_list_nodes'}], [{text: '⚙️ 系统设置快捷开关', callback_data: 'cb_settings'}] ] };
+            
+            if (callback_query) {
+                if (text === 'cb_menu') await tgEdit(chatId, msgId, mainMenuText, mainMenuKb);
+                else if (text === 'cb_list_nodes') {
+                    const { results } = await db.prepare('SELECT id, name, last_updated FROM probe_servers WHERE is_hidden != "true"').all();
+                    let kb = { inline_keyboard: [] };
+                    for (const s of results) { kb.inline_keyboard.push([{text: `${s.name}`, callback_data: `cb_node_${s.id}`}]); }
+                    kb.inline_keyboard.push([{text: '🔙 返回', callback_data: 'cb_menu'}]);
+                    await tgEdit(chatId, msgId, '📋 <b>当前在线探针：</b>', kb);
+                }
+                else if (text.startsWith('cb_node_')) {
+                    const id = text.split('_')[2]; const s = await db.prepare('SELECT * FROM probe_servers WHERE id = ?').bind(id).first();
+                    if (s) await tgEdit(chatId, msgId, `🖥 <b>探针详情:</b> ${s.name}\n\n系统: ${s.os||'-'}\nIP类型: IPv4:${s.ip_v4} / IPv6:${s.ip_v6}\n运行时长: ${s.uptime}\n分组: ${s.server_group}`, {inline_keyboard: [[{text: '🔙 返回列表', callback_data: 'cb_list_nodes'}]]});
+                }
+                else if (text === 'cb_settings') {
+                    let set = { is_public: 'true', show_price: 'true' }; try { const { results } = await db.prepare("SELECT key, value FROM probe_settings").all(); results.forEach(r => set[r.key]=r.value); } catch(e){}
+                    const kb = { inline_keyboard: [
+                        [{text: `${set.is_public === 'true' ? '✅' : '❌'} 公开大盘`, callback_data: 'cb_tog_is_public'}, {text: `${set.show_price === 'true' ? '✅' : '❌'} 显示价格`, callback_data: 'cb_tog_show_price'}],
+                        [{text: '🔙 返回主菜单', callback_data: 'cb_menu'}]
+                    ]};
+                    await tgEdit(chatId, msgId, '⚙️ <b>点击切换探针前台展示状态</b>', kb);
+                }
+                else if (text.startsWith('cb_tog_')) {
+                    const key = text.replace('cb_tog_', '');
+                    let cur = 'true'; try { const r = await db.prepare('SELECT value FROM probe_settings WHERE key=?').bind(key).first(); if(r) cur = r.value; } catch(e){}
+                    await db.prepare('INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(key, cur==='true'?'false':'true').run();
+                    await tgSend(chatId, `✅ 属性 ${key} 已成功切换！`);
+                }
+            }
+            if (message) {
+                const cmdParts = text.trim().split(/\s+/); const cmd = cmdParts[0].toLowerCase();
+                if (cmd === '/start' || cmd === '/menu') await tgSend(chatId, mainMenuText, mainMenuKb);
+                else if (cmd === '/set_interval' && cmdParts[1]) { await db.prepare('INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind('report_interval', cmdParts[1]).run(); await tgSend(chatId, `✅ 上报间隔设为 ${cmdParts[1]} 秒`); }
+                else if (cmd === '/set_sitetitle') { await db.prepare('INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind('site_title', text.replace(cmdParts[0], '').trim()).run(); await tgSend(chatId, '✅ 大盘标题已更新'); }
+            }
+            return new Response('OK', { status: 200 });
+        } catch(e) { return new Response('Webhook Error', {status:200}); }
+    }
+
     if (method === 'GET' && subPath === 'public') {
-        const settings = { theme: 'theme1', is_public: 'true', site_title: '⚡ Server Monitor Pro', show_price: 'true', show_expire: 'true', show_bw: 'true', show_tf: 'true', custom_css: '', custom_bg: '', custom_head: '', custom_script: '', report_interval: '5' };
+        const settings = { theme: 'theme1', is_public: 'true', site_title: '⚡ Server Monitor Pro', show_price: 'true', show_expire: 'true', show_bw: 'true', show_tf: 'true', custom_css: '', custom_bg: '', custom_head: '', custom_script: '', report_interval: '5', asset_currency: '元', seed_nodes: '', enable_popup: 'false', popup_content: '' };
         try { const { results } = await db.prepare('SELECT * FROM probe_settings').all(); if (results) results.forEach(r => settings[r.key] = r.value); } catch(e){}
         
         const isAjax = url.searchParams.get('ajax') === '1';
@@ -80,6 +175,51 @@ async function handleProbeAPI(request, env, context, pathArray) {
             if (vDate !== todayStr) { vToday = 1; vDate = todayStr; } else vToday++;
             settings.visits_total = vTotal.toString(); settings.visits_today = vToday.toString(); settings.visits_date = todayStr;
             context.waitUntil(db.prepare(`INSERT INTO probe_settings (key, value) VALUES ('visits_total', ?), ('visits_today', ?), ('visits_date', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(vTotal.toString(), vToday.toString(), todayStr).run().catch(()=>{}));
+
+            // 🌟 触发后台 Gossip 网络计算与发送
+            context.waitUntil((async () => {
+                try {
+                    const nowMs = Date.now();
+                    await db.prepare("DELETE FROM probe_peers WHERE last_seen < ? AND last_seen > 0").bind(nowMs - 86400000).run();
+                    let totalAssetGossip = 0; let totalServersGossip = 0;
+                    const { results: srvs } = await db.prepare("SELECT price FROM probe_servers WHERE is_hidden != 'true'").all();
+                    if (srvs) {
+                        totalServersGossip = srvs.length;
+                        for (const s of srvs) {
+                            if (s.price && s.price.match(/[\d.]+/)) {
+                                let rawAmount = parseFloat(s.price.match(/[\d.]+/)[0]) || 0;
+                                let rate = 1; const pUpper = s.price.toUpperCase();
+                                if (pUpper.includes('USD') || pUpper.includes('$')) rate = 7.23;
+                                else if (pUpper.includes('EUR') || pUpper.includes('€')) rate = 7.85;
+                                else if (pUpper.includes('GBP') || pUpper.includes('£')) rate = 9.12;
+                                else if (pUpper.includes('HKD')) rate = 0.92;
+                                else if (pUpper.includes('JPY')) rate = 0.048;
+                                else if (pUpper.includes('TWD')) rate = 0.22;
+                                else if (pUpper.includes('RUB')) rate = 0.078;
+                                else if (pUpper.includes('CAD')) rate = 5.25;
+                                else if (pUpper.includes('AUD')) rate = 4.75;
+                                totalAssetGossip += rawAmount * rate;
+                            }
+                        }
+                    }
+                    
+                    let seedNodes = settings.seed_nodes || 'tanzhen.kejikkk.com';
+                    let seedList = seedNodes.split(',').map(s => s.trim()).filter(s => s);
+                    let myDomain = url.hostname;
+                    let { results: dbPeers } = await db.prepare('SELECT domain FROM probe_peers WHERE domain != ? ORDER BY RANDOM() LIMIT 3').bind(myDomain).all();
+                    let targetDomains = dbPeers.map(p => p.domain);
+                    if (targetDomains.length === 0) targetDomains = seedList;
+                    const { results: allPeers } = await db.prepare('SELECT domain FROM probe_peers ORDER BY RANDOM() LIMIT 10').all();
+                    const known_peers = allPeers.map(p => p.domain);
+                    
+                    const payload = { domain: myDomain, server_count: totalServersGossip, total_asset: totalAssetGossip, version: nowMs, known_peers: known_peers };
+                    for (const peer of targetDomains) {
+                        if (peer === myDomain) continue;
+                        fetch(`https://${peer}/api/probe/gossip`, { method: 'POST', body: JSON.stringify(payload), headers: {'Content-Type': 'application/json'}, cf: { cacheTtl: 0 } }).catch(()=>{});
+                    }
+                    await db.prepare(`INSERT INTO probe_peers (domain, server_count, total_asset, version, last_seen) VALUES (?, ?, ?, ?, ?) ON CONFLICT(domain) DO UPDATE SET server_count=excluded.server_count, total_asset=excluded.total_asset, version=excluded.version, last_seen=excluded.last_seen`).bind(myDomain, totalServersGossip, totalAssetGossip, nowMs, nowMs).run();
+                } catch(e) {}
+            })());
         }
 
         const authHeader = request.headers.get("Authorization");
@@ -102,19 +242,28 @@ async function handleProbeAPI(request, env, context, pathArray) {
     if (method === 'GET' && subPath === 'admin/data') {
         const settings = {};
         try { const { results } = await db.prepare('SELECT * FROM probe_settings').all(); if (results) results.forEach(r => settings[r.key] = r.value); } catch(e){}
-        const servers = (await db.prepare('SELECT id, name, last_updated, server_group, price, expire_date, bandwidth, traffic_limit, agent_os, is_hidden FROM probe_servers').all()).results;
+        const servers = (await db.prepare('SELECT id, name, last_updated, server_group, price, expire_date, bandwidth, traffic_limit, agent_os, is_hidden, reset_day FROM probe_servers').all()).results;
         return Response.json({ settings, servers });
     }
     
     if (method === 'POST' && subPath === 'admin/settings') {
         const { settings } = await request.json();
         for (const [k, v] of Object.entries(settings)) { await db.prepare('INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(k, v).run(); }
+        // 自动绑定 TG Webhook
+        if (settings.tg_bot_token) {
+            try {
+               await fetch(`https://api.telegram.org/bot${settings.tg_bot_token}/setWebhook`, {
+                  method: 'POST', headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({ url: `${url.origin}/api/probe/tg_webhook` })
+               });
+            } catch(e) {}
+        }
         return Response.json({ success: true });
     }
 
     if (method === 'PUT' && subPath === 'admin/server') {
         const data = await request.json();
-        await db.prepare(`UPDATE probe_servers SET name=?, server_group=?, price=?, expire_date=?, bandwidth=?, traffic_limit=?, agent_os=?, is_hidden=? WHERE id=?`).bind(data.name || 'Unnamed', data.server_group || '默认分组', data.price || '', data.expire_date || '', data.bandwidth || '', data.traffic_limit || '', data.agent_os || 'debian', data.is_hidden || 'false', data.id).run();
+        await db.prepare(`UPDATE probe_servers SET name=?, server_group=?, price=?, expire_date=?, bandwidth=?, traffic_limit=?, agent_os=?, is_hidden=?, reset_day=? WHERE id=?`).bind(data.name || 'Unnamed', data.server_group || '默认分组', data.price || '', data.expire_date || '', data.bandwidth || '', data.traffic_limit || '', data.agent_os || 'debian', data.is_hidden || 'false', data.reset_day || '1', data.id).run();
         return Response.json({ success: true });
     }
     
@@ -147,7 +296,7 @@ export async function onRequest(context) {
         return Response.json({ success: true });
     }
 
-    // 🌟 Agent 统一探针与管理上报接口
+    // 🌟 Agent 统一探针与管理上报接口 (融入全新的 Reset Day 计算)
     if (action === "report" && method === "POST") {
         if (!(await verifyAuth(request.headers.get("Authorization"), db, env))) return new Response("Unauthorized", { status: 401 });
         const data = await request.json(); 
@@ -174,23 +323,45 @@ export async function onRequest(context) {
             if (countryCode.toUpperCase() === 'TW') countryCode = 'CN';
 
             const probeServer = await db.prepare('SELECT * FROM probe_servers WHERE id = ?').bind(vpsIp).first();
-            const localNow = new Date(nowMs + 8 * 60 * 60000); 
-            const currentMonthStr = `${localNow.getFullYear()}-${localNow.getMonth() + 1}`;
             
+            // --- 全新核心：基于动态 reset_day 的流量生命周期重置 ---
+            const localNow = new Date(nowMs + 8 * 60 * 60000); 
+            let y = localNow.getFullYear();
+            let m = localNow.getMonth() + 1;
+            let d = localNow.getDate();
+            
+            let resetDayVal = probeServer ? parseInt(probeServer.reset_day) || 1 : 1;
+            if (resetDayVal < 1) resetDayVal = 1; if (resetDayVal > 31) resetDayVal = 31;
+            
+            let maxDaysThisMonth = new Date(y, m, 0).getDate();
+            let actualResetDayThisMonth = Math.min(resetDayVal, maxDaysThisMonth);
+            
+            let currentCycleStr = '';
+            if (d < actualResetDayThisMonth) {
+                let pm = m - 1; let py = y;
+                if (pm === 0) { pm = 12; py -= 1; }
+                let maxDaysPrevMonth = new Date(py, pm, 0).getDate();
+                let actualResetDayPrevMonth = Math.min(resetDayVal, maxDaysPrevMonth);
+                currentCycleStr = `${py}-${pm}-${actualResetDayPrevMonth}`;
+            } else {
+                currentCycleStr = `${y}-${m}-${actualResetDayThisMonth}`;
+            }
+
             let monthly_rx = 0, monthly_tx = 0, last_rx = 0, last_tx = 0;
-            let reset_month = currentMonthStr;
+            let reset_month = currentCycleStr;
             let history = {};
 
             if (!probeServer) {
-                await db.prepare(`INSERT INTO probe_servers (id, name, cpu, ram, disk, load_avg, uptime, last_updated, ram_total, net_rx, net_tx, net_in_speed, net_out_speed, os, cpu_info, arch, boot_time, ram_used, swap_total, swap_used, disk_total, disk_used, processes, tcp_conn, udp_conn, country, ip_v4, ip_v6, server_group, price, expire_date, bandwidth, traffic_limit, ping_ct, ping_cu, ping_cm, ping_bd, monthly_rx, monthly_tx, last_rx, last_tx, reset_month, agent_os, history, is_hidden, virt) VALUES (?, ?, '0', '0', '0', '0', '0', 0, '0', '0', '0', '0', '0', '', '', '', '', '0', '0', '0', '0', '0', '0', '0', '0', ?, '1', '0', '默认分组', '免费', '', '', '', '0', '0', '0', '0', '0', '0', '0', '0', ?, 'debian', '{}', 'false', '')`).bind(vpsIp, serverName, countryCode, currentMonthStr).run();
+                await db.prepare(`INSERT INTO probe_servers (id, name, cpu, ram, disk, load_avg, uptime, last_updated, ram_total, net_rx, net_tx, net_in_speed, net_out_speed, os, cpu_info, arch, boot_time, ram_used, swap_total, swap_used, disk_total, disk_used, processes, tcp_conn, udp_conn, country, ip_v4, ip_v6, server_group, price, expire_date, bandwidth, traffic_limit, ping_ct, ping_cu, ping_cm, ping_bd, monthly_rx, monthly_tx, last_rx, last_tx, reset_month, agent_os, history, is_hidden, virt, reset_day) VALUES (?, ?, '0', '0', '0', '0', '0', 0, '0', '0', '0', '0', '0', '', '', '', '', '0', '0', '0', '0', '0', '0', '0', '0', ?, '1', '0', '默认分组', '免费', '', '', '', '0', '0', '0', '0', '0', '0', '0', '0', ?, 'debian', '{}', 'false', '', '1')`).bind(vpsIp, serverName, countryCode, currentCycleStr).run();
             } else {
                 monthly_rx = parseFloat(probeServer.monthly_rx || '0'); monthly_tx = parseFloat(probeServer.monthly_tx || '0');
                 last_rx = parseFloat(probeServer.last_rx || '0'); last_tx = parseFloat(probeServer.last_tx || '0');
-                reset_month = probeServer.reset_month || currentMonthStr;
+                reset_month = probeServer.reset_month || currentCycleStr;
                 
                 let autoReset = 'false';
                 try { const r = await db.prepare("SELECT value FROM probe_settings WHERE key = 'auto_reset_traffic'").first(); if (r) autoReset = r.value; } catch(e){}
-                if (autoReset === 'true' && currentMonthStr !== reset_month) { monthly_rx = 0; monthly_tx = 0; reset_month = currentMonthStr; }
+                // 周期变动立即清零结算
+                if (autoReset === 'true' && currentCycleStr !== reset_month) { monthly_rx = 0; monthly_tx = 0; reset_month = currentCycleStr; }
                 try { history = JSON.parse(probeServer.history || '{}'); } catch(e) {}
             }
 
@@ -440,7 +611,10 @@ export async function onRequestScheduled(context) {
     try {
         const { results } = await db.prepare(`SELECT ip, name, last_report FROM servers WHERE last_report < ? AND alert_sent = 0`).bind(nowMs - 180000).all();
         if (results && results.length > 0) {
-            const tgBotToken = env.TG_BOT_TOKEN; const tgChatId = env.TG_CHAT_ID; const updateStmts = [];
+            let tgBotToken = env.TG_BOT_TOKEN; let tgChatId = env.TG_CHAT_ID;
+            try { const { results: settings } = await db.prepare("SELECT key, value FROM probe_settings WHERE key IN ('tg_bot_token', 'tg_chat_id')").all(); settings.forEach(r => { if(r.key === 'tg_bot_token') tgBotToken = r.value; if(r.key === 'tg_chat_id') tgChatId = r.value; }); } catch(e){}
+            
+            const updateStmts = [];
             for (let vps of results) {
                 if (tgBotToken && tgChatId) { const text = `⚠️ [KUI 节点失联告警]\n\n节点别名: ${vps.name}\n公网IP: ${vps.ip}\n最后在线: ${new Date(vps.last_report).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`; await fetch(`https://api.telegram.org/bot${tgBotToken}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: tgChatId, text }) }); }
                 updateStmts.push(db.prepare("UPDATE servers SET alert_sent = 1 WHERE ip = ?").bind(vps.ip));
