@@ -1,6 +1,6 @@
 // ==========================================
 // KUI Serverless 聚合网关后端 - 完美融合版
-// (包含：自动建表 + 极速8合1协议生成 + CF Monitor Pro API化子系统)
+// (包含：自动建表 + 极速8合1协议生成 + CF Monitor Pro API化子系统 + Clash订阅自适应支持)
 // ==========================================
 
 async function sha256(text) {
@@ -245,18 +245,56 @@ export async function onRequest(context) {
         return Response.json({ success: true, configs: machineNodes });
     }
 
+    // 🌟 核心拦截并拆分普通订阅与 Clash 订阅生成
     if (action === "sub" && method === "GET") {
-        const urlObj = new URL(request.url); const ip = urlObj.searchParams.get("ip"); const reqUser = urlObj.searchParams.get("user"); const token = urlObj.searchParams.get("token"); const adminUser = env.ADMIN_USERNAME || "admin";
+        const urlObj = new URL(request.url); 
+        const ip = urlObj.searchParams.get("ip"); 
+        const reqUser = urlObj.searchParams.get("user"); 
+        const token = urlObj.searchParams.get("token"); 
+        const format = urlObj.searchParams.get("format"); 
+        const adminUser = env.ADMIN_USERNAME || "admin";
+
         let isValid = false;
-        if (reqUser === adminUser) { let adminSubToken = await sha256(env.ADMIN_PASSWORD || "admin"); try { const r = await db.prepare("SELECT val FROM sys_config WHERE key='admin_sub_token'").first(); if(r && r.val) adminSubToken = r.val; } catch(e){} isValid = (token === adminSubToken) || (token === await sha256(env.ADMIN_PASSWORD || "admin")); } 
-        else { const u = await db.prepare("SELECT password, sub_token FROM users WHERE username = ?").bind(reqUser).first(); if (u) isValid = (token === u.sub_token) || (!u.sub_token && token === u.password); }
+        if (reqUser === adminUser) { 
+            let adminSubToken = await sha256(env.ADMIN_PASSWORD || "admin"); 
+            try { const r = await db.prepare("SELECT val FROM sys_config WHERE key='admin_sub_token'").first(); if(r && r.val) adminSubToken = r.val; } catch(e){} 
+            isValid = (token === adminSubToken) || (token === await sha256(env.ADMIN_PASSWORD || "admin")); 
+        } 
+        else { 
+            const u = await db.prepare("SELECT password, sub_token FROM users WHERE username = ?").bind(reqUser).first(); 
+            if (u) isValid = (token === u.sub_token) || (!u.sub_token && token === u.password); 
+        }
+        
         if (!isValid) return new Response("Forbidden", { status: 403 });
-        const now = Date.now(); let query; let sqlParams = [now];
-        if (reqUser === adminUser) { query = `SELECT * FROM nodes WHERE enable = 1 AND (traffic_limit = 0 OR traffic_used < traffic_limit) AND (expire_time = 0 OR expire_time > ?) AND (username = ? OR username = 'admin')`; sqlParams.push(adminUser); if (ip) { query += " AND vps_ip = ?"; sqlParams.push(ip); } } 
-        else { query = `SELECT n.* FROM nodes n JOIN users u ON n.username = u.username WHERE n.enable = 1 AND (n.traffic_limit = 0 OR n.traffic_used < n.traffic_limit) AND (n.expire_time = 0 OR n.expire_time > ?) AND n.username = ? AND u.enable = 1 AND (u.traffic_limit = 0 OR u.traffic_used < u.traffic_limit) AND (u.expire_time = 0 OR u.expire_time > ?)`; sqlParams.push(reqUser, now); if (ip) { query += " AND n.vps_ip = ?"; sqlParams.push(ip); } }
-        const { results } = await db.prepare(query).bind(...sqlParams).all(); let subLinks = [];
+        
+        const now = Date.now(); 
+        let query; 
+        let sqlParams = [now];
+        
+        if (reqUser === adminUser) { 
+            query = `SELECT * FROM nodes WHERE enable = 1 AND (traffic_limit = 0 OR traffic_used < traffic_limit) AND (expire_time = 0 OR expire_time > ?) AND (username = ? OR username = 'admin')`; 
+            sqlParams.push(adminUser); 
+            if (ip) { query += " AND vps_ip = ?"; sqlParams.push(ip); } 
+        } else { 
+            query = `SELECT n.* FROM nodes n JOIN users u ON n.username = u.username WHERE n.enable = 1 AND (n.traffic_limit = 0 OR n.traffic_used < n.traffic_limit) AND (n.expire_time = 0 OR n.expire_time > ?) AND n.username = ? AND u.enable = 1 AND (u.traffic_limit = 0 OR u.traffic_used < u.traffic_limit) AND (u.expire_time = 0 OR u.expire_time > ?)`; 
+            sqlParams.push(reqUser, now); 
+            if (ip) { query += " AND n.vps_ip = ?"; sqlParams.push(ip); } 
+        }
+        
+        const { results } = await db.prepare(query).bind(...sqlParams).all(); 
+        
+        let subLinks = [];
+        let clashProxies = [];
+        let proxyNames = [];
+
         for (let node of results) {
-            const vpsInfo = await db.prepare("SELECT name FROM servers WHERE ip = ?").bind(node.vps_ip).first(); const rawRemark = `${vpsInfo ? vpsInfo.name : 'KUI'} | ${node.protocol}_${node.port}`; const remark = encodeURIComponent(rawRemark); let link = "";
+            const vpsInfo = await db.prepare("SELECT name FROM servers WHERE ip = ?").bind(node.vps_ip).first(); 
+            const rawRemark = `${vpsInfo ? vpsInfo.name : 'KUI'} | ${node.protocol}_${node.port}`; 
+            const remark = encodeURIComponent(rawRemark); 
+            let link = "";
+            let cProxy = "";
+
+            // --- 传统 Base64 URL 生成 ---
             switch (node.protocol) {
                 case "VLESS": link = `vless://${node.uuid}@${node.vps_ip}:${node.port}?encryption=none&security=none&type=tcp#${remark}`; break;
                 case "XTLS-Reality": case "Reality": link = `vless://${node.uuid}@${node.vps_ip}:${node.port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${node.sni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=tcp&headerType=none#${remark}`; break;
@@ -271,7 +309,77 @@ export async function onRequest(context) {
                 case "VLESS-Argo": if (!node.sni.includes('等待')) link = `vless://${node.uuid}@${node.sni}:443?encryption=none&security=tls&type=ws&host=${node.sni}&path=%2F#${remark}-Argo`; break;
             }
             if (link) subLinks.push(link);
+
+            // --- 动态拼装 Clash YAML 代理字典 (支持 Clash Meta / Mihomo) ---
+            if (format === 'clash') {
+                if (node.protocol.includes("VLESS") || node.protocol.includes("Reality")) {
+                    const serverIpOrSni = (node.protocol === 'VLESS-Argo' && !node.sni.includes('等待')) ? node.sni : node.vps_ip;
+                    const serverPort = node.protocol === 'VLESS-Argo' ? 443 : node.port;
+                    cProxy = `  - name: "${rawRemark}"\n    type: vless\n    server: ${serverIpOrSni}\n    port: ${serverPort}\n    uuid: ${node.uuid}\n    udp: true`;
+                    
+                    if (node.protocol === "XTLS-Reality" || node.protocol === "Reality") {
+                        cProxy += `\n    tls: true\n    flow: xtls-rprx-vision\n    servername: ${node.sni}\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: ${node.public_key}\n      short-id: ${node.short_id || ""}`;
+                    } else if (node.protocol === "gRPC-Reality") {
+                        cProxy += `\n    tls: true\n    servername: ${node.sni}\n    client-fingerprint: chrome\n    network: grpc\n    grpc-opts:\n      grpc-service-name: grpc\n    reality-opts:\n      public-key: ${node.public_key}\n      short-id: ${node.short_id || ""}`;
+                    } else if (node.protocol === "H2-Reality") {
+                        cProxy += `\n    tls: true\n    servername: ${node.sni}\n    client-fingerprint: chrome\n    network: h2\n    reality-opts:\n      public-key: ${node.public_key}\n      short-id: ${node.short_id || ""}`;
+                    } else if (node.protocol === 'VLESS-Argo' && !node.sni.includes('等待')) {
+                        cProxy += `\n    tls: true\n    servername: ${node.sni}\n    network: ws\n    ws-opts:\n      path: "/"\n      headers:\n        Host: ${node.sni}`;
+                    }
+                } else if (node.protocol === "Trojan") {
+                    cProxy = `  - name: "${rawRemark}"\n    type: trojan\n    server: ${node.vps_ip}\n    port: ${node.port}\n    password: ${node.private_key}\n    udp: true\n    sni: ${node.sni}\n    skip-cert-verify: true`;
+                } else if (node.protocol === "Hysteria2") {
+                    cProxy = `  - name: "${rawRemark}"\n    type: hysteria2\n    server: ${node.vps_ip}\n    port: ${node.port}\n    password: ${node.uuid}\n    sni: ${node.sni}\n    skip-cert-verify: true`;
+                } else if (node.protocol === "TUIC") {
+                    cProxy = `  - name: "${rawRemark}"\n    type: tuic\n    server: ${node.vps_ip}\n    port: ${node.port}\n    uuid: ${node.uuid}\n    password: ${node.private_key}\n    sni: ${node.sni}\n    skip-cert-verify: true`;
+                }
+                
+                if (cProxy) {
+                    clashProxies.push(cProxy);
+                    proxyNames.push(`"${rawRemark}"`);
+                }
+            }
         }
+
+        // --- 若为 Clash 格式，渲染 YAML 返回 ---
+        if (format === 'clash') {
+            const proxyGroupList = proxyNames.length > 0 ? proxyNames.map(n => `      - ${n}`).join('\n') : '      - DIRECT';
+            const clashYaml = `port: 7890
+socks-port: 7891
+allow-lan: true
+mode: rule
+log-level: info
+ipv6: false
+external-controller: 127.0.0.1:9090
+
+proxies:
+${clashProxies.join('\n')}
+
+proxy-groups:
+  - name: "PROXY"
+    type: select
+    proxies:
+      - "AUTO"
+${proxyGroupList}
+  - name: "AUTO"
+    type: url-test
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+    proxies:
+${proxyGroupList}
+
+rules:
+  - MATCH,PROXY
+`;
+            return new Response(clashYaml, { 
+                headers: { 
+                    "Content-Type": "text/yaml; charset=utf-8", 
+                    "Content-Disposition": "attachment; filename=kui-clash.yaml" 
+                }
+            });
+        }
+
+        // --- 否则走默认的 Base64 普通订阅格式 ---
         return new Response(btoa(unescape(encodeURIComponent(subLinks.join('\n')))), { headers: { "Content-Type": "text/plain; charset=utf-8" }});
     }
 
