@@ -168,8 +168,8 @@
                             <button class="probe-toggle-btn toggle-btn" :class="{active: probeView === 'table'}" @click="setProbeView('table')">表格</button>
                             <button class="probe-toggle-btn toggle-btn" :class="{active: probeView === 'map'}" @click="setProbeView('map')">地图</button>
                         </div>
-                        <button v-if="!isLoggedIn" @click="showLoginModal = true" class="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-lg font-bold text-sm shadow-md hover:opacity-90">👨‍💻 KUI 管理面板</button>
-                        <button v-else @click="activeTab = (role === 'admin' ? 'nodes' : 'dashboard')" class="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-lg font-bold text-sm shadow-md hover:opacity-90">返回 KUI 面板</button>
+                        <button v-if="!isLoggedIn" @click="showLoginModal = true" class="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-lg font-bold text-sm shadow-md hover:opacity-90 cursor-pointer">👨‍💻 KUI 管理面板</button>
+                        <button v-else @click="activeTab = (role === 'admin' ? 'nodes' : 'dashboard')" class="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-lg font-bold text-sm shadow-md hover:opacity-90 cursor-pointer">返回 KUI 面板</button>
                     </div>
                 </div>
 
@@ -226,7 +226,7 @@
                     </div>
 
                     <div v-if="probeView === 'card'">
-                        <template v-if="Object.keys(filteredProbeGroups).length === 0"><p class="text-center text-gray-500 w-full mt-10">暂无匹配的服务器</p></template>
+                         <template v-if="Object.keys(filteredProbeGroups).length === 0"><p class="text-center text-gray-500 w-full mt-10">暂无匹配的服务器</p><p class="text-center text-gray-400 text-sm mt-2">部署 KUI Agent 后，探针将自动在此处上报数据</p></template>
                         <template v-for="(servers, groupName) in filteredProbeGroups" :key="groupName">
                             <div class="probe-group-header group-header">{{ groupName }}</div>
                             <div class="probe-grid-container grid-container">
@@ -398,6 +398,11 @@
                 </div>
 
                 <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                    <div v-if="servers.length === 0" class="col-span-full text-center py-20">
+                        <div class="text-6xl mb-4">🖥️</div>
+                        <h3 class="text-xl font-black text-slate-700 mb-2">暂无接入的服务器</h3>
+                        <p class="text-slate-400 text-sm font-medium">请在上方表单填写服务器信息并点击“接入机器”添加您的第一台 VPS</p>
+                    </div>
                     <div v-for="vps in servers" :key="vps.ip" class="bg-white/70 backdrop-blur-xl rounded-[2rem] border border-white shadow-xl shadow-slate-200/40 flex flex-col overflow-hidden transition-all hover:shadow-2xl">
                         <div class="p-6 md:p-8 relative">
                             <div class="flex justify-between items-start mb-4">
@@ -798,7 +803,7 @@
             setup() {
                 const isLoggedIn = ref(false); const showLoginModal = ref(false); 
                 const loginUser = ref(''); const password = ref('');
-                const currentUser = ref(localStorage.getItem('kui_user') || ''); const authKey = ref(localStorage.getItem('kui_auth_key') || ''); const role = ref(localStorage.getItem('kui_role') || '');
+                const currentUser = ref(localStorage.getItem('kui_user') || ''); const authKey = ref(localStorage.getItem('kui_auth_key') || ''); const role = ref(localStorage.getItem('kui_role') || (authKey.value ? 'admin' : ''));
                 const activeTab = ref(localStorage.getItem('monitor_preferred_tab') || 'probe'); 
                 const currentDomain = window.location.origin;
 
@@ -938,7 +943,7 @@
                     const timestamp = Date.now().toString(); const signature = await generateHMAC(authKey.value, currentUser.value + timestamp);
                     options.headers = { ...options.headers, 'Authorization': `${btoa(currentUser.value)}.${timestamp}.${signature}` };
                     const res = await fetch(url, options);
-                    if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
+                    if (res.status === 401) { logout(); alert('⚠️ 登录已过期或无效，请重新登录'); throw new Error('Unauthorized'); }
                     if (!res.ok) { const err = await res.json(); alert(`❌ 后端报错: ${err.error || err.message}`); throw new Error('API Failed'); }
                     return res;
                 };
