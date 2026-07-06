@@ -104,7 +104,10 @@ cat > /opt/kui/config.json <<EOF
 EOF
 
 echo "正在拉取最新版 Agent 执行器..."
-curl -sL -A "$CURL_USER_AGENT" "https://raw.githubusercontent.com/a62169722/KUI/main/vps/agent.py" -o /opt/kui/agent.py
+AGENT_URL="${API_URL}/vps/agent.py"
+curl -sL -A "$CURL_USER_AGENT" "${AGENT_URL}" -o /opt/kui/agent.py
+[ ! -s /opt/kui/agent.py ] && echo "⚠️ 面板下载 agent.py 失败，尝试备用源..." && curl -sL -A "$CURL_USER_AGENT" "https://raw.githubusercontent.com/a62169722/KUI/main/vps/agent.py" -o /opt/kui/agent.py
+[ ! -s /opt/kui/agent.py ] && { echo "❌ 下载 agent.py 失败，请稍后重试或检查网络"; exit 1; }
 chmod +x /opt/kui/agent.py
 
 echo "[6/6] 🛡️ 智能注册底层守护进程并启动..."
