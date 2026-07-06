@@ -533,6 +533,36 @@ rules:
         if (action === "user" && params.path[1] === "sub_token" && method === "PUT") { const newToken = crypto.randomUUID(); if (isAdmin) await db.prepare("INSERT OR REPLACE INTO sys_config (key, val, ts) VALUES ('admin_sub_token', ?, ?)").bind(newToken, Date.now()).run(); else await db.prepare("UPDATE users SET sub_token = ? WHERE username = ?").bind(newToken, currentUser).run(); return Response.json({ success: true, token: newToken }); }
         if (action === "stats" && method === "GET" && isAdmin) { const query = `SELECT strftime('%m-%d', datetime(timestamp / 1000, 'unixepoch', 'localtime')) as day, SUM(delta_bytes) as total_bytes FROM traffic_stats WHERE ip = ? AND timestamp > ? GROUP BY day ORDER BY day ASC`; const { results } = await db.prepare(query).bind(new URL(request.url).searchParams.get("ip"), Date.now() - 604800000).all(); return Response.json(results || []); }
         
+        // --- 住宅IP代理相关 API ---
+        if (action === "proxy" && method === "POST") {
+            const subPath = params.path[1];
+            const body = await request.json();
+            
+            if (subPath === "config") {
+                // 保存代理配置到 probe_settings
+                const configStr = JSON.stringify(body);
+                await db.prepare("INSERT INTO probe_settings (key, value) VALUES ('proxy_config', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(configStr).run();
+                return Response.json({ success: true });
+            }
+            
+            if (subPath === "switch") {
+                // 记录强制切换指令
+                const trigger = body.switch_trigger || Date.now();
+                await db.prepare("INSERT INTO probe_settings (key, value) VALUES ('proxy_switch_trigger', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(trigger.toString()).run();
+                return Response.json({ success: true, message: "Switch command recorded" });
+            }
+            
+            if (subPath === "toggle") {
+                // 切换节点代理状态（存储在 probe_servers 表中，需要添加 proxy_enabled 字段或使用 sys_config）
+                const proxyState = JSON.stringify({ ip: body.ip, enable: body.enable });
+                await db.prepare("INSERT INTO probe_settings (key, value) VALUES ('proxy_toggle_' || ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(body.ip, proxyState).run();
+                return Response.json({ success: true });
+            }
+            
+            return Response.json({ error: "Not Found" }, { status: 404 });
+        }
+        
+        
         if (action === "users" && isAdmin) {
             if (method === "POST") { const { username, password, traffic_limit, expire_time } = await request.json(); const hash = await sha256(password); const subToken = crypto.randomUUID(); await db.prepare("INSERT INTO users (username, password, traffic_limit, expire_time, sub_token) VALUES (?, ?, ?, ?, ?)").bind(username, hash, traffic_limit, expire_time, subToken).run(); return Response.json({ success: true }); }
             if (method === "PUT") { const { username, enable, reset_traffic } = await request.json(); if (reset_traffic) await db.prepare("UPDATE users SET traffic_used = 0 WHERE username = ?").bind(username).run(); else if (enable !== undefined) await db.prepare("UPDATE users SET enable = ? WHERE username = ?").bind(enable, username).run(); return Response.json({ success: true }); }
