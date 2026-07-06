@@ -933,7 +933,12 @@
                 
                 const filteredProbeGroups = computed(() => { 
                     const groups = {}; 
-                    filteredProbeServers.value.forEach(s => { const g = s.server_group || '默认分组'; if(!groups[g]) groups[g] = []; groups[g].push(s); }); 
+                    const list = currentFilter.value === 'all' ? publicProbeServers.value : filteredProbeServers.value;
+                    list.forEach(s => { 
+                        const g = (s.server_group || '默认分组').toString(); 
+                        if(!groups[g]) groups[g] = []; 
+                        groups[g].push(s); 
+                    }); 
                     return groups; 
                 });
 
