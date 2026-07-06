@@ -105,9 +105,23 @@ EOF
 
 echo "正在拉取最新版 Agent 执行器..."
 AGENT_URL="${API_URL}/vps/agent.py"
-curl -sL -A "$CURL_USER_AGENT" "${AGENT_URL}" -o /opt/kui/agent.py
-[ ! -s /opt/kui/agent.py ] && echo "⚠️ 面板下载 agent.py 失败，尝试备用源..." && curl -sL -A "$CURL_USER_AGENT" "https://raw.githubusercontent.com/a62169722/KUI/main/vps/agent.py" -o /opt/kui/agent.py
-[ ! -s /opt/kui/agent.py ] && { echo "❌ 下载 agent.py 失败，请稍后重试或检查网络"; exit 1; }
+BACKUP_URL="https://raw.githubusercontent.com/a62169722/KUI/main/vps/agent.py"
+# 校验下载内容确实是 Python（含 import 且不是 GitHub 429/HTML 错误页）
+is_valid_py() { [ -s "$1" ] && grep -q "import " "$1" && ! grep -qiE "429|too many requests|<html" "$1"; }
+fetch_agent() { curl -sL --retry 3 --retry-delay 2 -A "$CURL_USER_AGENT" "$1" -o /opt/kui/agent.py; }
+rm -f /opt/kui/agent.py
+fetch_agent "$AGENT_URL"
+if ! is_valid_py /opt/kui/agent.py; then
+    echo "⚠️ 主源（面板）下载异常（可能未部署 vps/agent.py 或限流），尝试备用源..."
+    fetch_agent "$BACKUP_URL"
+fi
+if ! is_valid_py /opt/kui/agent.py; then
+    echo "⏳ 备用源疑似限流，等待 8s 后重试..."
+    sleep 8; fetch_agent "$BACKUP_URL"
+fi
+if ! is_valid_py /opt/kui/agent.py; then
+    echo "❌ 下载 agent.py 失败：请确认已在 Cloudflare Pages 部署本仓库（使 /vps/agent.py 可访问），或稍后避开 GitHub 限流再试。"; exit 1;
+fi
 chmod +x /opt/kui/agent.py
 
 echo "[6/6] 🛡️ 智能注册底层守护进程并启动..."
