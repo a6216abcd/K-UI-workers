@@ -220,6 +220,31 @@ async function handleProbeAPI(request, env, context, pathArray) {
 }
 
 // ==============================================
+// 住宅IP代理桥接：把 KUI 面板/统一 Agent 的 /api/proxy/* 请求转发到独立的
+// Free-Residential-IP-Proxy-Controller 部署（环境变量 PROXY_CTRL_URL + PROXY_CTRL_TOKEN）。
+// 这样面板与 Agent 始终走 KUIDEV 同域，无需前端暴露令牌或处理 CORS。
+// ==============================================
+async function proxyBridge(method, subPath, search, body, env) {
+    const ctrlUrl = env.PROXY_CTRL_URL;
+    const ctrlToken = env.PROXY_CTRL_TOKEN;
+    if (!ctrlUrl) {
+        return new Response(JSON.stringify({ error: "Proxy controller not configured. Set PROXY_CTRL_URL (and PROXY_CTRL_TOKEN) in Cloudflare Pages env." }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+    let url = ctrlUrl.replace(/\/+$/, '') + '/api/proxy/' + subPath;
+    if (search) url += (url.includes('?') ? '&' : '?') + search;
+    const init = {
+        method,
+        headers: { 'Content-Type': 'application/json', 'Authorization': ctrlToken || '' }
+    };
+    if (body !== null && body !== undefined) init.body = JSON.stringify(body);
+    console.log('[proxy-bridge] ->', method, '/api/proxy/' + subPath, search ? '?' + search : '', body ? JSON.stringify(body).slice(0, 200) : '');
+    const res = await fetch(url, init);
+    const text = await res.text();
+    console.log('[proxy-bridge] <-', method, '/api/proxy/' + subPath, 'status', res.status);
+    return new Response(text, { status: res.status, headers: { 'Content-Type': res.headers.get('Content-Type') || 'application/json' } });
+}
+
+// ==============================================
 // KUI 主体接口路由
 // ==============================================
 export async function onRequest(context) {
@@ -227,6 +252,11 @@ export async function onRequest(context) {
     const method = request.method;
     const action = params.path ? params.path[0] : ''; 
     const db = env.DB; 
+
+    // 防御：未绑定 D1 数据库时直接返回清晰错误，避免 Cloudflare 1101 (Worker threw exception)
+    if (!env || !env.DB) {
+        return new Response(JSON.stringify({ error: "D1 binding 'DB' is not configured in Cloudflare Pages. Please bind a D1 database (variable name DB) and redeploy." }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
 
     if (action === "probe") {
         await ensureDbSchema(db);
@@ -241,7 +271,9 @@ export async function onRequest(context) {
 
     // 🌟 Agent 统一探针与管理上报接口 (融入全新的 Reset Day 计算和动态云端测速节点)
     if (action === "report" && method === "POST") {
+     try {
         if (!(await verifyAuth(request.headers.get("Authorization"), db, env))) return new Response("Unauthorized", { status: 401 });
+        await ensureDbSchema(db);
         const data = await request.json(); 
         const nowMs = Date.now();
         const vpsIp = data.ip;
@@ -358,6 +390,9 @@ export async function onRequest(context) {
         } catch(e) {}
         
         return Response.json({ success: true, fast_mode: fastMode, interval: reportInterval, ping_ct: pingCt, ping_cu: pingCu, ping_cm: pingCm });
+     } catch (err) {
+        return Response.json({ error: "REPORT_ERR: " + (err && err.message ? err.message : String(err)) }, { status: 500 });
+     }
     }
 
     if (action === "config" && method === "GET") {
@@ -376,27 +411,28 @@ export async function onRequest(context) {
         return Response.json({ success: true, configs: machineNodes, proxy: proxyCfg });
     }
 
-    // 🌟 住宅IP代理池：列出所有已上报的 VPS SOCKS5 出口（含在线状态）
-    if (action === "proxy" && params.path[1] === "pool" && method === "GET") {
-        if (!(await verifyAuth(request.headers.get("Authorization"), db, env))) return new Response("Unauthorized", { status: 401 });
-        const { results } = await db.prepare("SELECT ip, socks_ip, port, user, pass, country, enabled, last_seen FROM proxy_servers").all();
-        const now = Date.now();
-        const list = (results || []).map(r => ({ ...r, online: (now - (r.last_seen || 0)) < 120000 }));
-        return Response.json(list);
-    }
-
-    // 🌟 住宅IP跨VPS互联（mesh）：返回可供本机链式转发的对端 SOCKS5 出口（排除自身、仅在线）
-    if (action === "proxy" && params.path[1] === "mesh" && method === "GET") {
-        if (!(await verifyAuth(request.headers.get("Authorization"), db, env))) return new Response("Unauthorized", { status: 401 });
-        const urlObj = new URL(request.url);
-        const myIp = urlObj.searchParams.get("ip") || "";
-        const country = (urlObj.searchParams.get("country") || "").toUpperCase();
-        const now = Date.now();
-        let q = "SELECT ip, socks_ip, port, user, pass, country FROM proxy_servers WHERE enabled = 1 AND ip != ? AND last_seen > ?";
-        const params = [myIp, now - 120000];
-        if (country && country !== "ANY") { q += " AND UPPER(country) = ?"; params.push(country); }
-        const { results } = await db.prepare(q).bind(...params).all();
-        return Response.json(results || []);
+    // 🌟 住宅IP代理：桥接到独立的 Free-Residential-IP-Proxy-Controller 部署
+    // 原版控制器仅支持 pool / config / report / switch，不包含 mesh。
+    if (action === "proxy") {
+        const sub = params.path && params.path[1] ? params.path[1] : '';
+        if (sub === "mesh") {
+            return new Response(JSON.stringify({ error: "mesh is not supported by the original Free-Residential-IP-Proxy-Controller" }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+        }
+        try {
+            if (method === "GET") {
+                const search = new URL(request.url).searchParams.toString();
+                const getSub = sub === "pool" ? "pool" : "config";
+                return await proxyBridge("GET", getSub, search, null, env);
+            }
+            if (method === "POST") {
+                let body = {};
+                try { body = await request.json(); } catch (e) {}
+                return await proxyBridge("POST", sub, null, body, env);
+            }
+            return new Response(JSON.stringify({ error: "Not Found" }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+        } catch (e) {
+            return new Response(JSON.stringify({ error: "PROXY_BRIDGE_ERR: " + (e && e.message ? e.message : String(e)) }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+        }
     }
 
     // 🌟 核心拦截并拆分普通订阅与 Clash 订阅生成
@@ -564,56 +600,6 @@ rules:
         if (action === "user" && params.path[1] === "sub_token" && method === "PUT") { const newToken = crypto.randomUUID(); if (isAdmin) await db.prepare("INSERT OR REPLACE INTO sys_config (key, val, ts) VALUES ('admin_sub_token', ?, ?)").bind(newToken, Date.now()).run(); else await db.prepare("UPDATE users SET sub_token = ? WHERE username = ?").bind(newToken, currentUser).run(); return Response.json({ success: true, token: newToken }); }
         if (action === "stats" && method === "GET" && isAdmin) { const query = `SELECT strftime('%m-%d', datetime(timestamp / 1000, 'unixepoch', 'localtime')) as day, SUM(delta_bytes) as total_bytes FROM traffic_stats WHERE ip = ? AND timestamp > ? GROUP BY day ORDER BY day ASC`; const { results } = await db.prepare(query).bind(new URL(request.url).searchParams.get("ip"), Date.now() - 604800000).all(); return Response.json(results || []); }
         
-        // --- 住宅IP代理相关 API ---
-        if (action === "proxy" && method === "POST") {
-            const subPath = params.path[1];
-            const body = await request.json();
-            
-            if (subPath === "config") {
-                // 保存代理配置：指定 VPS 时写入 per-IP toggle（含 mesh / 指定出口），否则写入全局默认
-                const { ip, enabled, port, country, mesh } = body;
-                if (ip) {
-                    let rec = { ip, enable: enabled !== false };
-                    try { const t = await db.prepare("SELECT value FROM probe_settings WHERE key='proxy_toggle_' || ?").bind(ip).first(); if (t && t.value) { const parsed = JSON.parse(t.value); rec = { ...parsed, ...rec }; } } catch (e) {}
-                    rec.mesh = mesh || null;
-                    await db.prepare("INSERT INTO probe_settings (key, value) VALUES ('proxy_toggle_' || ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(ip, JSON.stringify(rec)).run();
-                } else {
-                    let globalCfg = {};
-                    try { const g = await db.prepare("SELECT value FROM probe_settings WHERE key='proxy_config'").first(); if (g && g.value) globalCfg = JSON.parse(g.value); } catch (e) {}
-                    globalCfg.mesh = mesh || null;
-                    await db.prepare("INSERT INTO probe_settings (key, value) VALUES ('proxy_config', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(JSON.stringify(globalCfg)).run();
-                }
-                return Response.json({ success: true });
-            }
-            
-            if (subPath === "switch") {
-                // 记录强制切换指令
-                const trigger = body.switch_trigger || Date.now();
-                await db.prepare("INSERT INTO probe_settings (key, value) VALUES ('proxy_switch_trigger', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(trigger.toString()).run();
-                return Response.json({ success: true, message: "Switch command recorded" });
-            }
-            
-            if (subPath === "toggle") {
-                // 切换节点代理状态（存储在 probe_servers 表中，需要添加 proxy_enabled 字段或使用 sys_config）
-                const proxyState = JSON.stringify({ ip: body.ip, enable: body.enable });
-                await db.prepare("INSERT INTO probe_settings (key, value) VALUES ('proxy_toggle_' || ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(body.ip, proxyState).run();
-                return Response.json({ success: true });
-            }
-
-            if (subPath === "report") {
-                // Agent 心跳上报本机 SOCKS5 出口，汇入共享代理池
-                const { ip, socks_ip, port, user, pass, country, enabled, last_seen } = body;
-                if (!ip) return Response.json({ error: "ip required" }, { status: 400 });
-                await db.prepare(`INSERT INTO proxy_servers (ip, socks_ip, port, user, pass, country, enabled, last_seen) VALUES (?,?,?,?,?,?,?,?)
-                    ON CONFLICT(ip) DO UPDATE SET socks_ip=excluded.socks_ip, port=excluded.port, user=excluded.user, pass=excluded.pass, country=excluded.country, enabled=excluded.enabled, last_seen=excluded.last_seen`)
-                    .bind(ip, socks_ip || ip, parseInt(port) || 7920, user || "proxy", pass || "888888", (country || "").toUpperCase(), enabled ? 1 : 0, last_seen || Date.now()).run();
-                return Response.json({ success: true });
-            }
-
-            return Response.json({ error: "Not Found" }, { status: 404 });
-        }
-        
-        
         if (action === "users" && isAdmin) {
             if (method === "POST") { const { username, password, traffic_limit, expire_time } = await request.json(); const hash = await sha256(password); const subToken = crypto.randomUUID(); await db.prepare("INSERT INTO users (username, password, traffic_limit, expire_time, sub_token) VALUES (?, ?, ?, ?, ?)").bind(username, hash, traffic_limit, expire_time, subToken).run(); return Response.json({ success: true }); }
             if (method === "PUT") { const { username, enable, reset_traffic } = await request.json(); if (reset_traffic) await db.prepare("UPDATE users SET traffic_used = 0 WHERE username = ?").bind(username).run(); else if (enable !== undefined) await db.prepare("UPDATE users SET enable = ? WHERE username = ?").bind(enable, username).run(); return Response.json({ success: true }); }
@@ -636,7 +622,11 @@ rules:
         }
 
         return new Response("Not Found", { status: 404 });
-    } catch (err) { return Response.json({ error: err.message }, { status: 500 }); }
+    } catch (err) {
+        const msg = (err && err.message) ? err.message : String(err);
+        // 兜底捕获，杜绝未处理异常导致的 Cloudflare 1101
+        return new Response(JSON.stringify({ error: "SERVER_ERR: " + msg }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
 }
 
 export async function onRequestScheduled(context) {
