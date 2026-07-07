@@ -113,9 +113,9 @@ def update_config_loop():
                 time.sleep(15)
                 continue
             desired_country = str(data.get("0") or data.get("country") or "JP").upper()
-                switch_trigger = int(data.get("switch_trigger", 0))
-                new_port = int(data.get("port", 7920))
-                print(f"[cfg] 解析: country={desired_country}, port={new_port}, trigger={switch_trigger}, current_country={target_country}", flush=True)
+            switch_trigger = int(data.get("switch_trigger", 0))
+            new_port = int(data.get("port", 7920))
+            print(f"[cfg] 解析: country={desired_country}, port={new_port}, trigger={switch_trigger}, current_country={target_country}", flush=True)
                 
                 if new_port != PROXY_PORT:
                     print(f"[*] 收到端口变更指令 ({PROXY_PORT} -> {new_port})，重启守护进程...", flush=True)
