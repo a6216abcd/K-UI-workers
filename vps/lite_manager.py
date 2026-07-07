@@ -17,7 +17,8 @@ WEB_PASS = os.environ.get("WEB_PASS", "admin888")
 
 PROXY_PORT = 7920
 target_country = "JP"
-last_switch_trigger = 0  
+last_switch_trigger = 0
+last_config_sync = 0
 
 state_lock = threading.Lock()
 dead_ips = set()
@@ -78,12 +79,16 @@ def update_config_loop():
     global target_country, last_switch_trigger, PROXY_PORT, tun_main, tun_backup
     while True:
         try:
-            req = urllib.request.Request(f"{C2_URL}{C2_API_PREFIX}/config", headers=get_c2_headers())
+            url = f"{C2_URL}{C2_API_PREFIX}/config"
+            req = urllib.request.Request(url, headers=get_c2_headers())
             with urllib.request.urlopen(req, timeout=10) as res:
-                data = json.loads(res.read().decode("utf-8"))
+                raw = res.read().decode("utf-8")
+                print(f"[cfg] 拉取配置成功: {raw}", flush=True)
+                data = json.loads(raw)
                 desired_country = str(data.get("0", "JP")).upper()
                 switch_trigger = int(data.get("switch_trigger", 0))
                 new_port = int(data.get("port", 7920))
+                print(f"[cfg] 解析: country={desired_country}, port={new_port}, trigger={switch_trigger}, current_country={target_country}", flush=True)
                 
                 if new_port != PROXY_PORT:
                     print(f"[*] 收到端口变更指令 ({PROXY_PORT} -> {new_port})，重启守护进程...", flush=True)
@@ -108,7 +113,8 @@ def update_config_loop():
                         tun_backup.ready = False; tun_backup.process = None; tun_backup.entry_ip = ""; tun_backup.egress_ip = ""
                         
                         last_switch_trigger = switch_trigger
-        except Exception as e: pass
+        except Exception as e:
+            print(f"[cfg] 拉取配置失败: {e}", flush=True)
         time.sleep(15)
 
 def c2_heartbeat_loop():
