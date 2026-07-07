@@ -504,7 +504,7 @@ def register_self():
 
 def fetch_proxy_config():
     try:
-        req = urllib.request.Request(f"{PROXY_API}/api/proxy/config?ip={VPS_IP}", headers=HEADERS)
+        req = urllib.request.Request(f"{PROXY_API}/api/proxy/config?ip={VPS_IP}", headers=_proxy_ctrl_headers())
         res = urllib.request.urlopen(req, timeout=10)
         return json.loads(res.read().decode('utf-8'))
     except Exception:
@@ -581,7 +581,7 @@ def report_proxy_status():
             "enabled": bool(enabled),
             "last_seen": int(time.time())
         }
-        req = urllib.request.Request(f"{PROXY_API}/api/proxy/report", data=json.dumps(payload).encode(), headers=HEADERS)
+        req = urllib.request.Request(f"{PROXY_API}/api/proxy/report", data=json.dumps(payload).encode(), headers=_proxy_ctrl_headers())
         urllib.request.urlopen(req, timeout=10)
     except Exception:
         pass
