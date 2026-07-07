@@ -1335,7 +1335,8 @@
                 const map = await res.json();
                 const cfg0 = document.getElementById('slot-cfg-0');
                 const port = document.getElementById('slot-port');
-                if (cfg0) cfg0.value = (map["0"] || map.proxy?.country || 'JP').toUpperCase();
+                const country = map["0"] || map.proxy?.country || 'JP';
+                if (cfg0) cfg0.value = String(country).toUpperCase();
                 if (port) port.value = map["port"] || map.proxy?.port || 7920;
             } catch(e) { console.warn('[pc] loadConfig failed:', e); }
         }
@@ -1350,7 +1351,9 @@
                     headers: { 'Content-Type': 'application/json', 'Authorization': auth },
                     body: JSON.stringify({ "0": val, "port": port })
                 });
-                if (!res.ok) { const err = await res.text(); throw new Error(err || res.status); }
+                const text = await res.text();
+                if (!res.ok) throw new Error(text || res.status);
+                await pcLoadConfig();
                 alert('🚀 策略及端口已云端同步！Agent 将在下一心跳周期应用。');
             } catch (e) { alert('❌ 下发失败: ' + e.message); }
         }
