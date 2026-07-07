@@ -273,14 +273,18 @@ async function proxyLocal(method, subPath, req, env) {
                 if (results && results.length > 0) {
                     try { slotMap = JSON.parse(results[0].value); } catch(e) {}
                 }
-                const proxyCfg = { enabled: true, port: slotMap.port || 7920, user: env.PROXY_USER || 'proxy', pass: env.PROXY_PASS || '888888', country: slotMap["0"] || "JP" };
-                return new Response(JSON.stringify({ ...slotMap, proxy: proxyCfg }), { headers: { 'Content-Type': 'application/json' } });
+                const country = slotMap["0"] || slotMap.country || "JP";
+                const proxyCfg = { enabled: true, port: slotMap.port || 7920, user: env.PROXY_USER || 'proxy', pass: env.PROXY_PASS || '888888', country: country };
+                // 同时返回顶层 "0" 与 "country"，兼容本地双活引擎(lite_manager 读 "0")与外部控制器(读 country)两种 schema
+                return new Response(JSON.stringify({ ...slotMap, "0": country, country: country, proxy: proxyCfg }), { headers: { 'Content-Type': 'application/json' } });
             } catch (e) { return new Response(JSON.stringify({ success: false, error: "GET config failed: " + e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }); }
         }
         if (method === 'POST') {
             try {
                 const data = await req.json();
-                const sanitized = { "0": (data["0"] || "JP").toUpperCase(), "port": parseInt(data.port) || 7920 };
+                // 兼容两种下发 schema：本地双活引擎使用 "0"，外部住宅控制器/Vue 面板使用 "country"
+                const rawCountry = data["0"] || data.country || "JP";
+                const sanitized = { "0": String(rawCountry).toUpperCase(), "port": parseInt(data.port) || 7920 };
                 if (data.switch_trigger) sanitized.switch_trigger = data.switch_trigger;
                 await db.prepare(`INSERT INTO proxy_slot_map (key, value) VALUES ('slot_map', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(JSON.stringify(sanitized)).run();
                 const proxyCfg = { enabled: true, port: sanitized.port, user: env.PROXY_USER || 'proxy', pass: env.PROXY_PASS || '888888', country: sanitized["0"] || "JP" };
