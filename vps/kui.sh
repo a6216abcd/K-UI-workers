@@ -10,6 +10,7 @@ while [ "$#" -gt 0 ]; do
         --api) API_URL="$2"; shift ;;
         --ip) VPS_IP="$2"; shift ;;
         --token) TOKEN="$2"; shift ;;
+        --proxy-api) PROXY_API_URL="$2"; shift ;;
         *) echo "未知参数: $1"; exit 1 ;;
     esac
     shift
@@ -99,7 +100,8 @@ cat > /opt/kui/config.json <<EOF
   "api_url": "${API_URL}/api/config",
   "report_url": "${API_URL}/api/report",
   "ip": "${VPS_IP}",
-  "token": "${TOKEN}"
+  "token": "${TOKEN}",
+  "proxy_api": "${PROXY_API_URL}"
 }
 EOF
 
