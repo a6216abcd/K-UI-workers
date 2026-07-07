@@ -233,13 +233,24 @@ async function proxyBridge(method, subPath, request, env) {
     const targetOrigin = new URL(ctrlUrl).origin;
     if (currentOrigin === targetOrigin) return await proxyLocal(method, subPath, request, env);
     const target = ctrlUrl.replace(/\/+$/, '') + '/api/' + subPath;
-    const init = { method, headers: { 'Content-Type': 'application/json', 'Authorization': env.PROXY_CTRL_TOKEN || '' } };
+    let authHeader = '';
+    const ctrlUser = env.PROXY_CTRL_USER || env.ADMIN_USERNAME || '';
+    const ctrlPass = env.PROXY_CTRL_PASS || env.ADMIN_PASSWORD || '';
+    if (ctrlUser && ctrlPass) {
+      const encoded = btoa(`${ctrlUser}:${ctrlPass}`);
+      authHeader = `Basic ${encoded}`;
+    } else if (env.PROXY_CTRL_TOKEN) {
+      authHeader = env.PROXY_CTRL_TOKEN;
+    }
+    const init = { method, headers: { 'Content-Type': 'application/json', 'Authorization': authHeader } };
     if (method === 'POST') { try { init.body = await request.clone().text(); } catch (e) {} }
     console.log('[proxy-bridge] ->', method, target);
     const res = await fetch(target, init);
     const text = await res.text();
     console.log('[proxy-bridge] <-', method, target, 'status', res.status);
-    return new Response(text, { status: res.status, headers: { 'Content-Type': res.headers.get('Content-Type') || 'application/json' } });
+    const ct = res.headers.get('content-type') || '';
+    const isJson = ct.includes('json');
+    return new Response(text, { status: res.status, headers: { 'Content-Type': isJson ? 'application/json' : 'text/plain' } });
 }
 
 async function proxyLocal(method, subPath, req, env) {
@@ -253,18 +264,23 @@ async function proxyLocal(method, subPath, req, env) {
         if (method === 'GET') {
             try {
                 const { results } = await db.prepare('SELECT value FROM proxy_slot_map WHERE key = ?').bind('slot_map');
-                if (results && results.length > 0) return new Response(results[0].value, { headers: { 'Content-Type': 'application/json' } });
-            } catch (e) { return new Response(JSON.stringify({ error: "GET config failed: " + e.message }), { status: 500 }); }
-            return new Response(JSON.stringify({ "0": "JP", "port": 7920 }));
+                let slotMap = { "0": "JP", "port": 7920 };
+                if (results && results.length > 0) {
+                    try { slotMap = JSON.parse(results[0].value); } catch(e) {}
+                }
+                const proxyCfg = { enabled: true, port: slotMap.port || 7920, user: env.PROXY_USER || 'proxy', pass: env.PROXY_PASS || '888888', country: slotMap["0"] || "JP" };
+                return new Response(JSON.stringify({ ...slotMap, proxy: proxyCfg }), { headers: { 'Content-Type': 'application/json' } });
+            } catch (e) { return new Response(JSON.stringify({ success: false, error: "GET config failed: " + e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }); }
         }
         if (method === 'POST') {
             try {
                 const data = await req.json();
-                const sanitized = { "0": data["0"] || "JP", "port": parseInt(data.port) || 7920 };
+                const sanitized = { "0": (data["0"] || "JP").toUpperCase(), "port": parseInt(data.port) || 7920 };
                 if (data.switch_trigger) sanitized.switch_trigger = data.switch_trigger;
-                const r = await db.prepare(`INSERT INTO proxy_slot_map (key, value) VALUES ('slot_map', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(JSON.stringify(sanitized)).run();
-                return new Response("OK: " + JSON.stringify(r));
-            } catch (e) { return new Response("CONFIG_WRITE_ERR: " + e.message, { status: 500 }); }
+                await db.prepare(`INSERT INTO proxy_slot_map (key, value) VALUES ('slot_map', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(JSON.stringify(sanitized)).run();
+                const proxyCfg = { enabled: true, port: sanitized.port, user: env.PROXY_USER || 'proxy', pass: env.PROXY_PASS || '888888', country: sanitized["0"] || "JP" };
+                return new Response(JSON.stringify({ success: true, slot_map: sanitized, proxy: proxyCfg }), { headers: { 'Content-Type': 'application/json' } });
+            } catch (e) { return new Response(JSON.stringify({ success: false, error: "CONFIG_WRITE_ERR: " + e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }); }
         }
     }
 
