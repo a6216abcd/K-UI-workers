@@ -4,8 +4,18 @@ import os
 import select, socket, threading, urllib.parse, time, base64
 from typing import Any
 
-PROXY_USER = os.environ.get("PROXY_USER", "proxy").encode()
-PROXY_PASS = os.environ.get("PROXY_PASS", "888888").encode()
+_PROXY_USER = os.environ.get("PROXY_USER", "proxy")
+_PROXY_PASS = os.environ.get("PROXY_PASS", "888888")
+
+def set_credentials(user: str, passwd: str) -> None:
+    global _PROXY_USER, _PROXY_PASS, PROXY_USER, PROXY_PASS
+    _PROXY_USER = user
+    _PROXY_PASS = passwd
+    PROXY_USER = user.encode()
+    PROXY_PASS = passwd.encode()
+
+PROXY_USER = _PROXY_USER.encode()
+PROXY_PASS = _PROXY_PASS.encode()
 
 # 全局软开关：由 lite_manager 动态更新，实现秒切
 ACTIVE_BIND = "tun_main"
