@@ -142,57 +142,99 @@ def ensure_firewall_open(port):
 
 def get_port_traffic(port, protocol="tcp"):
     ensure_firewall_open(port)
-
-    # 查找匹配端口对应的节点 inbound tag
-    node_tag = None
-    for node in current_active_nodes:
-        if str(node.get("port")) == str(port):
-            node_tag = f"in-{node['id']}"
-            break
-
-    # 优先：sing-box HTTP API 获取单入站精确流量（cumulative bytes）
-    if node_tag:
-        try:
-            req = urllib.request.Request(
-                f"http://127.0.0.1:9090/stats/inbound/{node_tag}",
-                headers={"User-Agent": "KUI-Agent"}
-            )
-            with urllib.request.urlopen(req, timeout=2) as r:
-                raw = r.read().decode("utf-8")
-                data = json.loads(raw)
-                val = data.get("value")
-                if val is not None:
-                    return int(val)
-                # 部分版本把 bytes 装在 .bytes 字段
-                b = data.get("bytes")
-                if b is not None:
-                    return int(b)
-                # 部分版本返回数组 [up, down]
-                arr = data.get("traffic") or data.get("value_list")
-                if isinstance(arr, list) and len(arr) >= 2:
-                    return int(arr[0]) + int(arr[1])
-        except Exception:
-            pass
-
-    # 兜底：系统网卡累计流量（非单端口，但彻底消除 iptables 轮询开销）
     try:
-        rx = tx = 0
-        for iface in os.listdir("/sys/class/net/"):
-            if iface == "lo":
-                continue
+        in_bytes = out_bytes = 0
+        
+        # 验证端口是否存在于iptables规则中
+        def check_port_exists(port, protocol):
             try:
-                with open(f"/sys/class/net/{iface}/statistics/tx_bytes") as f:
-                    tx += int(f.read().strip())
-                with open(f"/sys/class/net/{iface}/statistics/rx_bytes") as f:
-                    rx += int(f.read().strip())
+                # 检查IPv4规则
+                result = subprocess.run(f"iptables -L INPUT -n --line-numbers | grep -E 'dpt:{port}|spt:{port}'", 
+                                      shell=True, capture_output=True, text=True)
+                if result.returncode == 0 and result.stdout.strip():
+                    return True
+                
+                # 检查IPv6规则
+                result6 = subprocess.run(f"ip6tables -L INPUT -n --line-numbers | grep -E 'dpt:{port}|spt:{port}'", 
+                                        shell=True, capture_output=True, text=True)
+                if result6.returncode == 0 and result6.stdout.strip():
+                    return True
+                    
+                return False
             except Exception:
-                continue
-        if rx > 0 or tx > 0:
-            return rx + tx
-    except Exception:
-        pass
-
-    return 0
+                return False
+        
+        # 只有在端口存在于iptables规则中时才进行流量统计
+        if check_port_exists(port, protocol):
+            # 统计输入流量
+            try:
+                if protocol in ["tcp", "all"]:
+                    result = subprocess.run(f"iptables -L INPUT -n --line-numbers | grep 'dpt:{port}'", 
+                                          shell=True, capture_output=True, text=True)
+                    if result.returncode == 0:
+                        for line in result.stdout.strip().split('\n'):
+                            if line.strip():
+                                parts = line.split()
+                                if len(parts) >= 10:  # 确保有足够的字段
+                                    try:
+                                        in_bytes += int(parts[1])
+                                    except (ValueError, IndexError):
+                                        continue
+            except Exception:
+                pass
+            
+            # 统计输出流量
+            try:
+                if protocol in ["tcp", "all"]:
+                    result = subprocess.run(f"iptables -L OUTPUT -n --line-numbers | grep 'spt:{port}'", 
+                                          shell=True, capture_output=True, text=True)
+                    if result.returncode == 0:
+                        for line in result.stdout.strip().split('\n'):
+                            if line.strip():
+                                parts = line.split()
+                                if len(parts) >= 10:
+                                    try:
+                                        out_bytes += int(parts[1])
+                                    except (ValueError, IndexError):
+                                        continue
+            except Exception:
+                pass
+            
+            # 统计IPv6流量
+            try:
+                if protocol in ["tcp", "all"]:
+                    result6 = subprocess.run(f"ip6tables -L INPUT -n --line-numbers | grep 'dpt:{port}'", 
+                                           shell=True, capture_output=True, text=True)
+                    if result6.returncode == 0:
+                        for line in result6.stdout.strip().split('\n'):
+                            if line.strip():
+                                parts = line.split()
+                                if len(parts) >= 10:
+                                    try:
+                                        in_bytes += int(parts[1])
+                                    except (ValueError, IndexError):
+                                        continue
+            except Exception:
+                pass
+            
+            try:
+                if protocol in ["tcp", "all"]:
+                    result6 = subprocess.run(f"ip6tables -L OUTPUT -n --line-numbers | grep 'spt:{port}'", 
+                                           shell=True, capture_output=True, text=True)
+                    if result6.returncode == 0:
+                        for line in result6.stdout.strip().split('\n'):
+                            if line.strip():
+                                parts = line.split()
+                                if len(parts) >= 10:
+                                    try:
+                                        out_bytes += int(parts[1])
+                                    except (ValueError, IndexError):
+                                        continue
+            except Exception:
+                pass
+        
+        return in_bytes + out_bytes
+    except Exception: return 0
 
 def get_system_status(current_interval):
     global prev_cpu_total, prev_cpu_idle, prev_rx, prev_tx, loop_counter, last_pings
@@ -330,37 +372,8 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         
         if proto == "VLESS": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"]}]})
         elif proto in ["XTLS-Reality", "Reality"]: singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"], "flow": "xtls-rprx-vision"}], "tls": {"enabled": True, "server_name": sni, "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}})
-        elif proto == "Hysteria2":
-            singbox_config["inbounds"].append({
-                "type": "hysteria2",
-                "tag": in_tag,
-                "listen": "::",
-                "listen_port": port,
-                "users": [{"password": node["uuid"]}],
-                "tls": {
-                    "enabled": True,
-                    "alpn": ["h3"],
-                    "certificate_path": cert_path,
-                    "key_path": key_path
-                },
-                "up_mbps": 1000,
-                "down_mbps": 1000
-            })
-        elif proto == "TUIC":
-            singbox_config["inbounds"].append({
-                "type": "tuic",
-                "tag": in_tag,
-                "listen": "::",
-                "listen_port": port,
-                "users": [{"uuid": node["uuid"], "password": node["private_key"]}],
-                "tls": {
-                    "enabled": True,
-                    "alpn": ["h3"],
-                    "certificate_path": cert_path,
-                    "key_path": key_path
-                },
-                "congestion_control": "bbr"
-            })
+        elif proto == "Hysteria2": singbox_config["inbounds"].append({"type": "hysteria2", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"password": node["uuid"]}], "tls": {"enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path}})
+        elif proto == "TUIC": singbox_config["inbounds"].append({"type": "tuic", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"], "password": node["private_key"]}], "tls": {"enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path}})
         elif proto == "Trojan": singbox_config["inbounds"].append({"type": "trojan", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"password": node["private_key"]}], "tls": {"enabled": True, "server_name": sni, "certificate_path": cert_path, "key_path": key_path}})
         elif proto == "H2-Reality": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"]}], "tls": {"enabled": True, "server_name": sni, "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}, "transport": {"type": "http"}})
         elif proto == "gRPC-Reality": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"]}], "tls": {"enabled": True, "server_name": sni, "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}, "transport": {"type": "grpc", "service_name": "grpc"}})
