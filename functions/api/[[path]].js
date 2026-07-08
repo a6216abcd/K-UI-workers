@@ -96,10 +96,13 @@ async function parseThirdPartySubscription(content) {
     }
     const lines = decoded.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const protocolCounts = {};
-    const debug = { totalLines: lines.length, matched: 0, hy2Found: false, hy2Count: 0, firstFewLines: [], hy2Line: '', unmatchedPrefixes: {} };
+    const debug = { totalLines: lines.length, matched: 0, hy2Found: false, hy2Count: 0, firstFewLines: [], hy2Line: '', allPrefixes: {}, unmatchedPrefixes: {} };
     for (const raw of lines) {
         if (debug.firstFewLines.length < 5) debug.firstFewLines.push(raw.substring(0, 120));
         const rawLC = raw.toLowerCase();
+        const sep = rawLC.indexOf('://');
+        const pf = sep > 0 ? rawLC.substring(0, sep + 3) : rawLC.substring(0, Math.min(rawLC.length, 40));
+        debug.allPrefixes[pf] = (debug.allPrefixes[pf] || 0) + 1;
         if ((rawLC.startsWith('hysteria2://') || rawLC.startsWith('hy2://') || rawLC.startsWith('hysteria://')) && !debug.hy2Line) {
             debug.hy2Found = true;
             debug.hy2Count++;
