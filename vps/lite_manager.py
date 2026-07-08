@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import base64, csv, os, subprocess, threading, time, urllib.request, json
+import base64, csv, os, subprocess, threading, time, urllib.request, json, ipaddress
 from pathlib import Path
 import proxy_server
 
@@ -60,7 +60,16 @@ def get_public_ip():
         req = urllib.request.Request("https://api.ipify.org", headers={"User-Agent": "curl/7.68.0"})
         with urllib.request.urlopen(req, timeout=5) as res:
             public_ip = res.read().decode("utf-8").strip()
-    except: public_ip = "Unknown_IP"
+        if public_ip and ':' in public_ip:
+            raise ValueError("Got IPv6")
+    except:
+        try:
+            req = urllib.request.Request("https://api.ipify.org?format=text",
+                                          headers={"User-Agent": "curl/7.68.0"})
+            with urllib.request.urlopen(req, timeout=5) as res:
+                public_ip = res.read().decode("utf-8").strip()
+        except:
+            public_ip = "Unknown_IP"
 
 def get_c2_headers():
     auth_ptr = base64.b64encode(f"{WEB_USER}:{WEB_PASS}".encode()).decode()
@@ -183,9 +192,10 @@ def setup_env():
     if not AUTH_FILE.exists():
         AUTH_FILE.write_text("vpn\nvpn\n", encoding="utf-8")
         AUTH_FILE.chmod(0o600)
-    # 强制系统解除反向路径过滤，防止策略路由双拨时数据包被内核丢弃
     subprocess.run(["sysctl", "-w", "net.ipv4.conf.all.rp_filter=2"], capture_output=True)
     subprocess.run(["sysctl", "-w", "net.ipv4.conf.default.rp_filter=2"], capture_output=True)
+    subprocess.run(["sysctl", "-w", "net.ipv4.ip_forward=1"], capture_output=True)
+    subprocess.run(["sysctl", "-w", "net.ipv6.conf.all.forwarding=1"], capture_output=True)
 
 def harvest_snapshot_nodes() -> list:
     try:
@@ -268,17 +278,31 @@ def connect_node(tun: Tunnel, node: dict):
             setup_routing(tun.name, tun.table_id)
             time.sleep(1) 
             
-            # --- 穿透获取通道真实出口 IP ---
+            # --- 穿透获取通道真实出口 IP（纯IPv6+WARP兼容） ---
             true_ip = ""
             try:
-                true_ip_res = subprocess.run(["curl", "-s", "-m", "10", "--interface", tun.name, "https://api.ipify.org"], capture_output=True, text=True)
+                true_ip_res = subprocess.run(["curl", "-s", "-m", "10", "--interface", tun.name, "-4", "https://api.ipify.org"], capture_output=True, text=True)
                 candidate_ip = true_ip_res.stdout.strip()
-                if candidate_ip and candidate_ip.count('.') == 3:
+                try:
+                    ipaddress.IPv4Address(candidate_ip)
                     true_ip = candidate_ip
+                except (ipaddress.AddressValueError, ValueError):
+                    pass
             except: pass
-            
+
+            if not true_ip:
+                try:
+                    true_ip_res = subprocess.run(["curl", "-s", "-m", "10", "--interface", tun.name, "-6", "https://api6.ipify.org"], capture_output=True, text=True)
+                    candidate_ip = true_ip_res.stdout.strip()
+                    try:
+                        ipaddress.IPv6Address(candidate_ip)
+                        true_ip = candidate_ip
+                    except (ipaddress.AddressValueError, ValueError):
+                        pass
+                except: pass
+
             egress_ip = true_ip if true_ip else node['ip']
-            
+
             if true_ip and true_ip != node['ip']:
                 print(f"[*] {tun.name} 探测到真实出口 IP 与入口不一致: 入口 {node['ip']} -> 出口 {true_ip}", flush=True)
 
