@@ -179,28 +179,20 @@ EOF
         rc-update del proxy-lite default >/dev/null 2>&1 || true
         rm -f /etc/init.d/proxy-lite /etc/conf.d/proxy-lite
 
-        CONF_FILE="/etc/conf.d/proxy-lite"
-        cat > "$CONF_FILE" << EOF
-C2_URL="${CONTROLLER}"
-WEB_USER="${WEB_USER:-admin}"
-WEB_PASS="${WEB_PASS:-admin888}"
-PROXY_USER="${PROXY_USER:-proxy}"
-PROXY_PASS="${PROXY_PASS:-888888}"
-PYTHONIOENCODING=utf-8
-LANG=C.UTF-8
-EOF
-        cat > /etc/init.d/proxy-lite << 'EOF'
+        cat > /etc/init.d/proxy-lite << EOF
 #!/sbin/openrc-run
 name="proxy-lite"
 description="Proxy Core Engine (Active-Standby)"
 command="/usr/bin/python3"
 command_args="-u lite_manager.py"
 directory="/opt/proxy_lite"
-env_files="/etc/conf.d/proxy-lite"
-pre_start() {
-    [ -f /etc/conf.d/proxy-lite ] && . /etc/conf.d/proxy-lite
-    export C2_URL WEB_USER WEB_PASS PROXY_USER PROXY_PASS PYTHONIOENCODING LANG
-}
+export C2_URL="${CONTROLLER}"
+export WEB_USER="${WEB_USER:-admin}"
+export WEB_PASS="${WEB_PASS:-admin888}"
+export PROXY_USER="${PROXY_USER:-proxy}"
+export PROXY_PASS="${PROXY_PASS:-888888}"
+export PYTHONIOENCODING="utf-8"
+export LANG="C.UTF-8"
 depend() {
     need net
     after firewall
