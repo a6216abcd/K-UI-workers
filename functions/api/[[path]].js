@@ -851,16 +851,17 @@ export async function onRequest(context) {
         try {
             const { results: thNodes } = await db.prepare("SELECT * FROM third_party_nodes WHERE enable = 1").all();
             for (const node of thNodes) {
+                try {
                 const remark = encodeURIComponent(node.name || `TP_${node.protocol}_${node.port}`);
                 let link = "";
                 switch (node.protocol) {
                     case "VMess": {
-                        const vmessObj = { v: "2", ps: node.name || '', add: node.address, port: node.port, id: node.uuid, aid: "0", scy: "auto", net: node.network || 'tcp', type: "none", host: node.host || '', path: node.path || '', tls: "", sni: (node.sni !== node.address) ? node.sni : '' };
-                        if (node.extra) { try { const e = JSON.parse(node.extra); if (e.aid) vmessObj.aid = String(e.aid); } catch(ex) {} }
-                        link = `vmess://${btoa(unescape(encodeURIComponent(JSON.stringify(vmessObj))))}#${remark}`;
+                        const vmessObj = { "v": "2", "ps": (node.name || node.uuid || '').replace(/[^\x20-\x7E]/g, ''), "add": node.address, "port": node.port, "id": node.uuid, "aid": "0", "scy": "auto", "net": node.network||'tcp', "type": "none", "host": node.host||'', "path": node.path||'', "tls": "", "sni": (node.sni&&node.sni!==node.address) ? node.sni : '' };
+                        try { const e = JSON.parse(node.extra||'{}'); if (e.aid) vmessObj.aid = String(e.aid); } catch(ex) {}
+                        link = 'vmess://' + btoa(JSON.stringify(vmessObj)) + '#' + remark;
                         break;
                     }
-                    case "VLESS": link = `vless://${node.uuid}@${node.address}:${node.port}?encryption=none&security=none&type=${node.network || 'tcp'}${node.path ? '&path=' + node.path : ''}${node.host ? '&host=' + node.host : ''}#${remark}`; break;
+                    case "VLESS": link = `vless://${node.uuid}@${node.address}:${node.port}?encryption=none&security=none&type=${node.network || 'tcp'}${node.path ? '&path=' + encodeURIComponent(node.path) : ''}${node.host ? '&host=' + encodeURIComponent(node.host) : ''}#${remark}`; break;
                     case "XTLS-Reality": case "Reality": link = `vless://${node.uuid}@${node.address}:${node.port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${node.sni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=tcp#${remark}`; break;
                     case "Hysteria2": link = `hysteria2://${node.uuid}@${node.address}:${node.port}/?insecure=1&sni=${node.sni}&alpn=h3#${remark}`; break;
                     case "TUIC": link = `tuic://${node.uuid}:${node.password}@${node.address}:${node.port}?sni=${node.sni}&congestion_control=bbr&alpn=h3&allow_insecure=1#${remark}`; break;
@@ -898,6 +899,7 @@ export async function onRequest(context) {
                         proxyNames.push(`"${node.name || 'TP'}"`);
                     }
                 }
+                } catch(e) {}
             }
         } catch (e) {}
 
