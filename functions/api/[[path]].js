@@ -10,7 +10,7 @@ async function sha256(text) {
 
 function parseHysteria2Link(raw) {
     try {
-        let rest = raw.slice(raw.startsWith('hy2://') ? 5 : raw.startsWith('hysteria://') ? 10 : 11);
+        let rest = raw.slice(raw.startsWith('hy2://') ? 5 : raw.startsWith('hysteria2://') ? 12 : raw.startsWith('hysteria://') ? 10 : 11);
         const hashIdx = rest.indexOf('#');
         let remark = '';
         if (hashIdx !== -1) { remark = rest.slice(hashIdx + 1); rest = rest.slice(0, hashIdx); }
