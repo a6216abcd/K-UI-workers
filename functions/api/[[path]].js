@@ -110,15 +110,15 @@ async function parseThirdPartySubscription(content) {
                 const jsonStr = base64ToUtf8(raw.slice(8));
                 const obj = JSON.parse(jsonStr);
                 node = {
-                    protocol: 'XTLS-Reality', name: obj.ps || '', address: obj.add || obj.host || '', port: parseInt(obj.port) || 443,
+                    protocol: 'VMess', name: obj.ps || '', address: obj.add || obj.host || '', port: parseInt(obj.port) || 443,
                     uuid: obj.id || obj.uuid || '', password: '', sni: obj.sni || obj.host || obj.add || '',
                     public_key: obj.pbk || '', short_id: obj.sid || '', flow: obj.flow || '', network: (obj.net || 'tcp').toLowerCase(),
-                    host: obj.host || '', path: obj.path || '', extra: '', enable: 1
+                    host: obj.host || '', path: obj.path || '', extra: parseInt(obj.aid || 0) ? JSON.stringify({aid: parseInt(obj.aid)}) : '', enable: 1
                 };
             } else if (raw.startsWith('vless://')) {
                 const url = new URL(raw);
                 node = {
-                    protocol: 'XTLS-Reality', name: safeHashDecode(url), address: url.hostname, port: parseInt(url.port) || 443,
+                    protocol: 'VLESS', name: safeHashDecode(url), address: url.hostname, port: parseInt(url.port) || 443,
                     uuid: url.username, password: '', sni: url.searchParams.get('sni') || url.hostname,
                     public_key: url.searchParams.get('pbk') || '', short_id: url.searchParams.get('sid') || '',
                     flow: url.searchParams.get('flow') || '', network: (url.searchParams.get('type') || 'tcp').toLowerCase(),
@@ -854,6 +854,13 @@ export async function onRequest(context) {
                 const remark = encodeURIComponent(node.name || `TP_${node.protocol}_${node.port}`);
                 let link = "";
                 switch (node.protocol) {
+                    case "VMess": {
+                        const vmessObj = { v: "2", ps: node.name || '', add: node.address, port: node.port, id: node.uuid, aid: "0", scy: "auto", net: node.network || 'tcp', type: "none", host: node.host || '', path: node.path || '', tls: "", sni: (node.sni !== node.address) ? node.sni : '' };
+                        if (node.extra) { try { const e = JSON.parse(node.extra); if (e.aid) vmessObj.aid = String(e.aid); } catch(ex) {} }
+                        link = `vmess://${btoa(unescape(encodeURIComponent(JSON.stringify(vmessObj))))}#${remark}`;
+                        break;
+                    }
+                    case "VLESS": link = `vless://${node.uuid}@${node.address}:${node.port}?encryption=none&security=none&type=${node.network || 'tcp'}${node.path ? '&path=' + node.path : ''}${node.host ? '&host=' + node.host : ''}#${remark}`; break;
                     case "XTLS-Reality": case "Reality": link = `vless://${node.uuid}@${node.address}:${node.port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${node.sni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=tcp#${remark}`; break;
                     case "Hysteria2": link = `hysteria2://${node.uuid}@${node.address}:${node.port}/?insecure=1&sni=${node.sni}&alpn=h3#${remark}`; break;
                     case "TUIC": link = `tuic://${node.uuid}:${node.password}@${node.address}:${node.port}?sni=${node.sni}&congestion_control=bbr&alpn=h3&allow_insecure=1#${remark}`; break;
@@ -868,7 +875,9 @@ export async function onRequest(context) {
 
                 if (format === 'clash') {
                     let cProxy = "";
-                    if (node.protocol.includes("VLESS") || node.protocol.includes("Reality")) {
+                    if (node.protocol === "VMess") {
+                        cProxy = `  - name: "${node.name || 'TP'}"\n    type: vmess\n    server: ${node.address}\n    port: ${node.port}\n    uuid: ${node.uuid}\n    alterId: 0\n    cipher: auto\n    udp: true${node.network && node.network !== 'tcp' ? `\n    network: ${node.network}${node.host ? `\n    ws-headers:\n      Host: ${node.host}` : ''}${node.path ? `\n    ws-path: ${node.path}` : ''}` : ''}`;
+                    } else if (node.protocol.includes("VLESS") || node.protocol.includes("Reality")) {
                         cProxy = `  - name: "${node.name || 'TP'}"\n    type: vless\n    server: ${node.address}\n    port: ${node.port}\n    uuid: ${node.uuid}\n    udp: true`;
                         if (node.protocol === "XTLS-Reality" || node.protocol === "Reality") {
                             cProxy += `\n    tls: true\n    flow: xtls-rprx-vision\n    servername: ${node.sni}\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: ${node.public_key}\n      short-id: ${node.short_id || ""}`;
