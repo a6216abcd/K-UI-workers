@@ -361,6 +361,7 @@
                         <button @click="activeTab = 'nodes'" :class="activeTab === 'nodes' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">服务器与节点</button>
                         <button @click="activeTab = 'users'" :class="activeTab === 'users' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">多用户管理</button>
                         <button @click="activeTab = 'proxy'" :class="activeTab === 'proxy' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">🌐 住宅IP代理</button>
+                        <button @click="activeTab = 'thirdparty'" :class="activeTab === 'thirdparty' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">🔗 第三方订阅</button>
                         <button @click="activeTab = 'settings'" :class="activeTab === 'settings' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">⚙️ 系统设置</button>
                         <button @click="activeTab = 'probe'; probeDetailId = null;" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base text-emerald-600 hover:bg-emerald-50 shadow-sm border border-transparent hover:border-emerald-200">🌐 探针全景大盘</button>
                     </template>
@@ -705,6 +706,40 @@
                 </div>
             </div>
 
+            <div v-if="role === 'admin' && activeTab === 'thirdparty'" class="space-y-6">
+                <div class="bg-white/60 backdrop-blur-xl p-6 md:p-8 rounded-[2rem] border border-white shadow-xl shadow-slate-200/40">
+                    <h3 class="text-xl font-black text-slate-800 mb-4 flex items-center gap-2">🔗 添加第三方机场订阅</h3>
+                    <p class="text-xs text-slate-500 mb-4 font-medium">粘贴机场订阅链接（支持 Base64 / 直链），添加后系统将自动解析节点并存入数据库。删除订阅时会自动删除关联节点。后续更新请重新添加。</p>
+                    <div class="flex flex-col md:flex-row gap-4 items-end">
+                        <div class="flex-1 w-full"><label class="block text-xs font-bold text-slate-400 mb-2 pl-2">订阅别名</label><input v-model="newThirdParty.name" placeholder="例如: 美国机场" class="w-full bg-white/50 border border-white p-3 rounded-2xl transition hover:bg-white focus:bg-white text-sm"></div>
+                        <div class="flex-1 w-full"><label class="block text-xs font-bold text-slate-400 mb-2 pl-2">订阅链接 URL</label><input v-model="newThirdParty.url" placeholder="https://xxx.com/api/v1/client/subscribe?token=xxx" class="w-full bg-white/50 border border-white p-3 rounded-2xl transition hover:bg-white focus:bg-white text-sm font-mono"></div>
+                        <button @click="addThirdPartySubscription" :disabled="loadingThirdParty" class="h-[50px] bg-gradient-to-r from-orange-500 to-red-500 text-white px-8 rounded-2xl font-bold shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 transition-all whitespace-nowrap disabled:opacity-50">{{ loadingThirdParty ? '解析中...' : '➕ 添加并解析' }}</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <div v-for="sub in thirdPartySubscriptions" :key="sub.id" class="bg-white/70 backdrop-blur-xl p-6 rounded-[2rem] border border-white shadow-xl shadow-slate-200/40 hover:shadow-orange-100/50 transition-all">
+                        <div class="flex justify-between items-start mb-4">
+                            <div>
+                                <h3 class="font-black text-lg text-slate-800 flex items-center gap-2">{{ sub.name }} <span :class="sub.is_enable ? 'bg-emerald-500' : 'bg-rose-500'" class="w-2.5 h-2.5 rounded-full inline-block shadow-sm"></span></h3>
+                                <p class="text-[11px] text-slate-400 font-mono mt-1 break-all truncate">{{ sub.url }}</p>
+                            </div>
+                            <div class="flex gap-2">
+                                <button @click="toggleThirdPartySubscription(sub.id, sub.is_enable ? 0 : 1)" class="px-3 py-1.5 bg-white border border-slate-100 hover:bg-slate-50 rounded-xl text-xs font-bold shadow-sm">{{ sub.is_enable ? '停用' : '启用' }}</button>
+                                <button @click="deleteThirdPartySubscription(sub.id)" class="px-3 py-1.5 bg-rose-50 text-rose-500 rounded-xl text-xs font-bold transition-all">删除</button>
+                            </div>
+                        </div>
+                        <div class="flex justify-between items-center text-[11px] text-slate-500 font-bold">
+                            <span>解析节点: <span class="text-orange-600">{{ sub.node_count }}</span> 个</span>
+                            <span>添加: {{ new Date(sub.added_at).toLocaleDateString() }}</span>
+                        </div>
+                    </div>
+                </div>
+                <div v-if="thirdPartySubscriptions.length === 0" class="bg-white/60 backdrop-blur-xl p-12 rounded-[2rem] border border-dashed border-slate-300 text-center">
+                    <p class="text-slate-400 font-medium text-sm">暂无第三方订阅，请在上方添加。</p>
+                </div>
+            </div>
+
             <div v-if="activeTab === 'settings'" class="space-y-6">
                 <template v-if="role === 'admin'">
                     <div class="bg-white/60 backdrop-blur-xl p-8 rounded-[2.5rem] border border-white shadow-xl shadow-slate-200/40">
@@ -893,6 +928,7 @@
                 const newVps = ref({ name: '', ip: '', os: 'debian' }); const newNodeParams = reactive({}); const newUser = reactive({ username: '', password: '', traffic_limit_gb: '', expire_date: '' });
                 const mySubToken = ref(''); const siteTitle = ref(''); const siteTitleInput = ref(''); const userNewPassword = ref('');
                 const batchStartPort = reactive({}); const batchUser = reactive({}); 
+                const thirdPartySubscriptions = ref([]); const newThirdParty = reactive({ name: '', url: '' }); const loadingThirdParty = ref(false);
                 
                 let initOsMap = {}; try { initOsMap = JSON.parse(localStorage.getItem('kui_deploy_os') || '{}'); } catch(e) {}
                 const deployOsMap = reactive(initOsMap);
@@ -923,7 +959,7 @@
                 
                 const showWelcomePopup = ref(false);
 
-                watch(activeTab, (val) => { localStorage.setItem('monitor_preferred_tab', val); if (val === 'proxy' && isLoggedIn.value) { loadProxyPool(); setTimeout(pcInitProxy, 0); } else { pcStopProxy(); } });
+                watch(activeTab, (val) => { localStorage.setItem('monitor_preferred_tab', val); if (val === 'proxy' && isLoggedIn.value) { loadProxyPool(); setTimeout(pcInitProxy, 0); } else { pcStopProxy(); } if (val === 'thirdparty') loadThirdPartySubscriptions(); });
                 watch(probeView, (val) => localStorage.setItem('monitor_preferred_view', val));
 
                 const hasCustomCssFlag = computed(() => {
@@ -1162,9 +1198,11 @@
                             if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'XTLS-Reality', port: 443, username: 'admin', sni: '', relay_type: 'external', traffic_limit_gb: '', expire_date: '' }; 
                             if(!deployOsMap[s.ip]) deployOsMap[s.ip] = 'debian'; if(!batchStartPort[s.ip]) batchStartPort[s.ip] = ''; if(!batchUser[s.ip]) batchUser[s.ip] = 'admin';
                         });
-                        if (activeTab.value === 'nodes') renderKUICharts();
-                        
-                        if (activeTab.value === 'settings' && role.value === 'admin') {
+                    if (activeTab.value === 'nodes') renderKUICharts();
+                    
+                    if (activeTab.value === 'thirdparty') loadThirdPartySubscriptions();
+                    
+                    if (activeTab.value === 'settings' && role.value === 'admin') {
                             const probeRes = await fetchApi('/api/probe/admin/data'); const probeData = await probeRes.json();
                             Object.assign(probeSys, probeData.settings);
                             if (probeData.settings.cached_nodes_data) parseCachedNodes(probeData.settings.cached_nodes_data);
@@ -1250,6 +1288,43 @@
                 const openProbeEditModal = (s) => { editingProbeNode.value = JSON.parse(JSON.stringify(s)); if(!editingProbeNode.value.is_hidden) editingProbeNode.value.is_hidden = 'false'; if(!editingProbeNode.value.reset_day) editingProbeNode.value.reset_day = '1'; probeEditModalOpen.value = true; };
                 const saveProbeEdit = async () => { await fetchApi('/api/probe/admin/server', { method: 'PUT', body: JSON.stringify(editingProbeNode.value) }); probeEditModalOpen.value = false; refreshData(); fetchProbeData(); };
                 const deleteProbeNode = async (id) => { if (!confirm("⚠️ 确定要彻底删除该探针记录吗？如果机器还在运行 Agent，之后会自动复活！请确保先在面板的「服务器与节点」中删除此机器。")) return; await fetchApi(`/api/probe/admin/server?id=${id}`, { method: 'DELETE' }); refreshData(); fetchProbeData(); };
+                
+                const loadThirdPartySubscriptions = async () => {
+                    try {
+                        const res = await fetchApi('/api/thirdparty');
+                        thirdPartySubscriptions.value = await res.json();
+                    } catch(e) { thirdPartySubscriptions.value = []; }
+                };
+                
+                const addThirdPartySubscription = async () => {
+                    if (!newThirdParty.url) return alert('请填写订阅链接！');
+                    loadingThirdParty.value = true;
+                    try {
+                        const res = await fetchApi('/api/thirdparty', { method: 'POST', body: JSON.stringify({ name: newThirdParty.name, url: newThirdParty.url }) });
+                        if (res.ok) {
+                            const data = await res.json();
+                            alert(`✅ 订阅添加成功！成功解析 ${data.parsedCount || 0} 个节点。`);
+                            newThirdParty.name = ''; newThirdParty.url = '';
+                            loadThirdPartySubscriptions();
+                        }
+                    } catch(e) { alert('添加失败: ' + e.message); }
+                    loadingThirdParty.value = false;
+                };
+                
+                const toggleThirdPartySubscription = async (id, isEnable) => {
+                    try {
+                        await fetchApi('/api/thirdparty', { method: 'PUT', body: JSON.stringify({ id, enable: isEnable }) });
+                        loadThirdPartySubscriptions();
+                    } catch(e) {}
+                };
+                
+                const deleteThirdPartySubscription = async (id) => {
+                    if (!confirm('确定删除该订阅？关联的解析节点也会被一并删除！')) return;
+                    try {
+                        await fetchApi(`/api/thirdparty?id=${id}`, { method: 'DELETE' });
+                        loadThirdPartySubscriptions();
+                    } catch(e) { alert('删除失败: ' + e.message); }
+                };
 
                 // --- 住宅IP代理控制器方法 ---
                 const proxyConfig = reactive({ ip: '', country: 'JP', port: 7920, mesh: { enabled: false, country: 'ANY', mode: 'all', nodes: '', exit: 'ANY' } });
@@ -1330,6 +1405,7 @@
                     globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, saveSiteTitle, userNewPassword, updateUserPassword, resetMySubLink, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,
                     probeSys, publicProbeServers, filteredProbeServers, probeView, probeDetailId, probeDetail, setProbeView, openProbeDetail, probeGlobalOnline, probeGlobalOffline, probeGlobalSpeedIn, probeGlobalSpeedOut, probeGlobalNetRx, probeGlobalNetTx, filteredProbeGroups, probeCountryStats, currentFilter,
                     saveProbeSettings, adminProbeServers, probeEditModalOpen, editingProbeNode, openProbeEditModal, saveProbeEdit, deleteProbeNode, currentDomain,
+                    thirdPartySubscriptions, newThirdParty, loadingThirdParty, loadThirdPartySubscriptions, addThirdPartySubscription, toggleThirdPartySubscription, deleteThirdPartySubscription,
                     qrModalOpen, qrCodeImage, showQrCode, 
                     showWelcomePopup, closePopup,
                     availableThemes, pingNodes, pullGithubNodes, hasCustomCssFlag,
