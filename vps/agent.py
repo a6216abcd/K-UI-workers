@@ -467,7 +467,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         except Exception:
             pass
 
-    # --- SOCKS5 出站代理：将非转发节点流量统一路由到外部 SOCKS5 代理 ---
+    # --- SOCKS5 出站代理：全局出站 / 按分类选择性出站（YouTube / AI / 谷歌 / 流媒体）---
     if socks5_outbound and socks5_outbound.get("enabled"):
         try:
             s5_addr = socks5_outbound.get("addr", "")
@@ -482,16 +482,58 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
                 if s5_pass:
                     s5_outbound["password"] = str(s5_pass)
                 singbox_config["outbounds"].append(s5_outbound)
-                existing_routed = set()
-                for rule in singbox_config["route"]["rules"]:
-                    for ib in rule.get("inbound", []):
-                        existing_routed.add(ib)
-                for node in nodes:
-                    if node.get("protocol") == "dokodemo-door":
-                        continue
-                    in_tag = f"in-{node['id']}"
-                    if in_tag not in existing_routed:
-                        singbox_config["route"]["rules"].append({"inbound": [in_tag], "outbound": s5_tag})
+                s5_mode = socks5_outbound.get("mode", "global")
+                if s5_mode == "selective":
+                    # 按分类选择性出站：仅勾选的分类域名走 SOCKS5
+                    CATEGORY_DOMAINS = {
+                        "youtube": {
+                            "keywords": ["youtube", "youtu", "googlevideo", "ytimg"],
+                            "suffixes": [".youtube.com", ".youtu.be", ".googlevideo.com", ".ytimg.com"]
+                        },
+                        "ai": {
+                            "keywords": ["openai", "chatgpt", "claude", "anthropic", "gemini", "bard", "copilot", "grok", "perplexity", "midjourney"],
+                            "suffixes": [".openai.com", ".anthropic.com", ".claude.ai", ".chatgpt.com", ".deepmind.com", ".cohere.com", ".huggingface.co", ".perplexity.ai", ".midjourney.com", ".ai.com"]
+                        },
+                        "google": {
+                            "keywords": ["google"],
+                            "suffixes": [".google.com", ".googleapis.com", ".googleusercontent.com", ".googlesyndication.com", ".googleadservices.com", ".gstatic.com", ".google-analytics.com"]
+                        },
+                        "streaming": {
+                            "keywords": ["netflix", "hulu", "disney", "hbo", "spotify", "tiktok", "twitch", "vimeo", "dailymotion", "bilibili", "crunchyroll", "peacock"],
+                            "suffixes": [".netflix.com", ".hulu.com", ".disneyplus.com", ".hbomax.com", ".spotify.com", ".tiktok.com", ".twitch.tv", ".vimeo.com", ".dailymotion.com", ".bilibili.com", ".crunchyroll.com", ".peacocktv.com"]
+                        }
+                    }
+                    s5_domains_raw = socks5_outbound.get("domains", "")
+                    selected = []
+                    if s5_domains_raw:
+                        try:
+                            parsed = json.loads(s5_domains_raw)
+                            if isinstance(parsed, dict):
+                                selected = parsed.get("categories", [])
+                        except Exception:
+                            pass
+                    all_keywords = []
+                    all_suffixes = []
+                    for cat in selected:
+                        entry = CATEGORY_DOMAINS.get(cat)
+                        if entry:
+                            all_keywords.extend(entry["keywords"])
+                            all_suffixes.extend(entry["suffixes"])
+                    if all_keywords or all_suffixes:
+                        route_rule = {"domain_keyword": all_keywords, "domain_suffix": all_suffixes, "outbound": s5_tag}
+                        singbox_config["route"]["rules"].append(route_rule)
+                else:
+                    # 全局出站：所有非转发节点流量走 SOCKS5
+                    existing_routed = set()
+                    for rule in singbox_config["route"]["rules"]:
+                        for ib in rule.get("inbound", []):
+                            existing_routed.add(ib)
+                    for node in nodes:
+                        if node.get("protocol") == "dokodemo-door":
+                            continue
+                        in_tag = f"in-{node['id']}"
+                        if in_tag not in existing_routed:
+                            singbox_config["route"]["rules"].append({"inbound": [in_tag], "outbound": s5_tag})
         except Exception:
             pass
 
