@@ -55,9 +55,11 @@ function parseVLESSLink(raw) {
         const host = params.get('host') || '';
         const path = params.get('path') || '';
         const name = hash ? (() => { try { return decodeURIComponent(hash); } catch(e) { return hash; } })() : '';
+        const isReality = params.get('security') === 'reality' || !!pbk;
+        const protocol = isReality ? 'Reality' : 'VLESS';
         if (!uuid || !hostPart) return null;
         return {
-            protocol: 'VLESS', name, address: hostPart, port, uuid, password: '', sni,
+            protocol, name, address: hostPart, port, uuid, password: '', sni,
             public_key: pbk, short_id: sid, flow, network: network.toLowerCase(), host, path, extra: '', enable: 1
         };
     } catch (e) { return null; }
