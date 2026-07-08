@@ -63,6 +63,8 @@ Type=simple
 Environment="C2_URL=${CONTROLLER}"
 Environment="WEB_USER=${WEB_USER:-admin}"
 Environment="WEB_PASS=${WEB_PASS:-admin888}"
+Environment="PROXY_USER=${PROXY_USER:-proxy}"
+Environment="PROXY_PASS=${PROXY_PASS:-888888}"
 Environment="PYTHONIOENCODING=utf-8"
 Environment="LANG=C.UTF-8"
 WorkingDirectory=/opt/proxy_lite
