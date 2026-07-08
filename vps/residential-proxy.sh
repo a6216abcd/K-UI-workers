@@ -166,14 +166,56 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-
         systemctl daemon-reload
         systemctl enable proxy-lite.service
         systemctl restart proxy-lite.service
         echo "[+] 引擎更新成功！主备双活通道、异步刷IP逻辑已全量加载。"
+    elif [ "$INIT_SYS" = "openrc" ]; then
+        CONF_FILE="/etc/conf.d/proxy-lite"
+        cat > "$CONF_FILE" << EOF
+C2_URL="${CONTROLLER}"
+WEB_USER="${WEB_USER:-admin}"
+WEB_PASS="${WEB_PASS:-admin888}"
+PROXY_USER="${PROXY_USER:-proxy}"
+PROXY_PASS="${PROXY_PASS:-888888}"
+PYTHONIOENCODING=utf-8
+LANG=C.UTF-8
+EOF
+        cat > /etc/init.d/proxy-lite << 'EOF'
+#!/sbin/openrc-run
+name="proxy-lite"
+description="Proxy Core Engine (Active-Standby)"
+command="/usr/bin/python3"
+command_args="-u lite_manager.py"
+directory="/opt/proxy_lite"
+env_files="/etc/conf.d/proxy-lite"
+depend() {
+    need net
+    after firewall
+}
+EOF
+        chmod +x /etc/init.d/proxy-lite
+        rc-update add proxy-lite default >/dev/null 2>&1 || true
+        rc-service proxy-lite restart 2>/dev/null || true
+        echo "[+] OpenRC 服务安装完成。"
+        echo "    手动管理: rc-service proxy-lite start|stop|restart"
+        echo "    查看日志: tail -f /opt/proxy_lite/lite_manager.log 或 log_read /var/log/openrc/proxy-lite"
     else
-        echo "[*] 未检测到 systemd，跳过 systemd 服务安装"
-        echo "    请手动启动: cd /opt/proxy_lite && python3 -u lite_manager.py"
+        cat > /opt/proxy_lite/run.sh << EOF
+#!/bin/sh
+export C2_URL="${CONTROLLER}"
+export WEB_USER="${WEB_USER:-admin}"
+export WEB_PASS="${WEB_PASS:-admin888}"
+export PROXY_USER="${PROXY_USER:-proxy}"
+export PROXY_PASS="${PROXY_PASS:-888888}"
+export PYTHONIOENCODING=utf-8
+export LANG=C.UTF-8
+cd /opt/proxy_lite
+exec python3 -u lite_manager.py
+EOF
+        chmod +x /opt/proxy_lite/run.sh
+        echo "[+] 未检测到标准初始化系统，启动脚本已创建: /opt/proxy_lite/run.sh"
+        echo "    请运行: /opt/proxy_lite/run.sh"
     fi
 }
 
