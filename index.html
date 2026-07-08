@@ -1303,7 +1303,16 @@
                         const res = await fetchApi('/api/thirdparty', { method: 'POST', body: JSON.stringify({ name: newThirdParty.name, url: newThirdParty.url }) });
                         if (res.ok) {
                             const data = await res.json();
-                            alert(`✅ 订阅添加成功！成功解析 ${data.parsedCount || 0} 个节点。`);
+                            let msg = `✅ 订阅添加成功！成功解析 ${data.parsedCount || 0} 个节点。`;
+                            if (data.debug) {
+                                const d = data.debug;
+                                if (d.protocolCounts) msg += `\n协议分布: ${JSON.stringify(d.protocolCounts)}`;
+                                if (d.debug && d.debug.hy2Found && (!d.protocolCounts || !d.protocolCounts.Hysteria2)) {
+                                    msg += `\n⚠️ 订阅中发现 hysteria2 行但解析失败！hy2原始行: ${d.debug.hy2Line || '(空)'}`;
+                                }
+                                if (d.fetchError) msg += `\n❌ 拉取订阅失败: ${d.fetchError}`;
+                            }
+                            alert(msg);
                             newThirdParty.name = ''; newThirdParty.url = '';
                             loadThirdPartySubscriptions();
                         }
