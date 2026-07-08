@@ -10,33 +10,45 @@ async function sha256(text) {
 
 function parseHysteria2Link(raw) {
     try {
-        let rest = raw.slice(raw.startsWith('hy2://') ? 5 : raw.startsWith('hysteria2://') ? 12 : raw.startsWith('hysteria://') ? 10 : 11);
+        let prefixLen = 11;
+        if (raw.startsWith('hy2://')) prefixLen = 5;
+        else if (raw.startsWith('hysteria2://')) prefixLen = 12;
+        else if (raw.startsWith('hysteria://')) prefixLen = 10;
+        let rest = raw.slice(prefixLen);
         const hashIdx = rest.indexOf('#');
         let remark = '';
         if (hashIdx !== -1) { remark = rest.slice(hashIdx + 1); rest = rest.slice(0, hashIdx); }
         const qIdx = rest.indexOf('?');
         let queryPart = '';
         if (qIdx !== -1) { queryPart = rest.slice(qIdx + 1); rest = rest.slice(0, qIdx); }
-        const [userinfo, ...addrParts] = rest.split('@');
-        if (!userinfo || addrParts.length === 0) return null;
-        const password = decodeURIComponent(userinfo);
-        let host = addrParts.join('@');
-        let port = 443;
-        if (host.includes(':')) {
-            const idx = host.lastIndexOf(':');
-            const pStr = host.slice(idx + 1);
-            if (/^\d+$/.test(pStr)) { port = parseInt(pStr, 10); host = host.slice(0, idx); }
-        }
         const params = new URLSearchParams(queryPart);
+        let password = '';
+        let host = '';
+        let port = 443;
+        if (rest.includes('@')) {
+            const atIdx = rest.lastIndexOf('@');
+            password = decodeURIComponent(rest.slice(0, atIdx));
+            host = rest.slice(atIdx + 1);
+        } else {
+            password = params.get('password') || '';
+            host = rest;
+        }
+        const colonIdx = host.lastIndexOf(':');
+        if (colonIdx !== -1) {
+            const maybePort = host.slice(colonIdx + 1);
+            if (/^\d+$/.test(maybePort)) {
+                port = parseInt(maybePort, 10);
+                host = host.slice(0, colonIdx);
+            }
+        }
         const sni = params.get('sni') || host;
-        const name = remark ? decodeURIComponent(remark) : '';
-        if (!host || !port) return null;
+        const name = remark ? (() => { try { return decodeURIComponent(remark); } catch (e) { return remark; } })() : '';
+        if (!host || isNaN(port)) return null;
         return {
             protocol: 'Hysteria2', name, address: host, port, uuid: password, password, sni,
             public_key: '', short_id: '', flow: '', network: 'udp', host: '', path: '', extra: '', enable: 1
         };
     } catch (e) {
-        console.error('[TP parse HY2 error]', e && e.message, 'line:', raw);
         return null;
     }
 }
@@ -83,9 +95,16 @@ async function parseThirdPartySubscription(content) {
         }
     }
     const lines = decoded.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const protocolCounts = {};
+    const debug = { totalLines: lines.length, matched: 0, hy2Found: false, hy2Count: 0, firstFewLines: [], hy2Line: '' };
     for (const raw of lines) {
+        if (debug.firstFewLines.length < 5) debug.firstFewLines.push(raw.substring(0, 120));
+        if ((raw.startsWith('hysteria2://') || raw.startsWith('hy2://') || raw.startsWith('hysteria://')) && !debug.hy2Line) {
+            debug.hy2Found = true;
+            debug.hy2Count++;
+            if (debug.hy2Count <= 1) debug.hy2Line = raw.substring(0, 160);
+        }
         let node = null;
-        let parseError = null;
         try {
             if (raw.startsWith('vmess://')) {
                 const jsonStr = base64ToUtf8(raw.slice(8));
@@ -173,17 +192,16 @@ async function parseThirdPartySubscription(content) {
                 }
             }
         } catch (e) {
-            parseError = e;
             node = null;
         }
         if (node && node.address && node.port) {
             node.id = crypto.randomUUID();
             nodes.push(node);
-        } else if (raw.startsWith('hysteria2://') || raw.startsWith('hy2://') || raw.startsWith('hysteria://')) {
-            console.error('[TP parse skip] HY2 failed:', parseError && parseError.message, 'line:', raw);
+            protocolCounts[node.protocol] = (protocolCounts[node.protocol] || 0) + 1;
+            debug.matched++;
         }
     }
-    return nodes;
+    return { nodes, protocolCounts, debug };
 }
 
 async function ensureDbSchema(db) {
@@ -999,19 +1017,21 @@ rules:
                 const id = crypto.randomUUID();
                 const now = Date.now();
                 await db.prepare("INSERT INTO third_party_subscriptions (id, name, url, added_at, last_fetched_at) VALUES (?, ?, ?, ?, ?)" ).bind(id, name || '第三方订阅', url, now, now).run();
-                let parsedCount = 0;
+                let parsedCount = 0; let parseDebug = {};
                 try {
                     const res = await fetch(url, { headers: { 'User-Agent': 'KUI-TP-Client/1.0' } });
                     const text = await res.text();
-                    const nodes = await parseThirdPartySubscription(text);
+                    const result = await parseThirdPartySubscription(text);
+                    const { nodes, protocolCounts, debug } = result;
+                    parseDebug = { protocolCounts, debug };
                     if (nodes.length > 0) {
                         const stmts = nodes.map(n => db.prepare("INSERT INTO third_party_nodes (id, subscription_id, name, protocol, address, port, uuid, password, sni, public_key, short_id, flow, network, host, path, extra, enable, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(n.id, id, n.name, n.protocol, n.address, n.port, n.uuid || '', n.password || '', n.sni || '', n.public_key || '', n.short_id || '', n.flow || '', n.network || '', n.host || '', n.path || '', n.extra || '', 1, now));
                         await db.batch(stmts);
                         parsedCount = nodes.length;
                     }
-                } catch (e) { console.error("解析第三方订阅失败:", e); }
+                } catch (e) { console.error("解析第三方订阅失败:", e); parseDebug.fetchError = (e && e.message) || String(e); }
                 await db.prepare("UPDATE third_party_subscriptions SET last_fetched_at = ? WHERE id = ?").bind(Date.now(), id).run();
-                return Response.json({ success: true, id, parsedCount });
+                return Response.json({ success: true, id, parsedCount, debug: parseDebug });
             }
             if (method === "GET") {
                 const { results } = await db.prepare("SELECT s.*, COUNT(n.id) as node_count FROM third_party_subscriptions s LEFT JOIN third_party_nodes n ON s.id = n.subscription_id GROUP BY s.id ORDER BY s.added_at DESC").all();
