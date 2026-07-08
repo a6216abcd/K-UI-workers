@@ -8,6 +8,7 @@ import subprocess
 import re
 import sys
 import base64
+import socket
 from datetime import datetime
 
 # 强制系统编码锁
@@ -393,7 +394,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None):
                 singbox_config["outbounds"].append({ "type": "direct", "tag": out_tag, "override_address": node["target_ip"], "override_port": int(node["target_port"]) })
             singbox_config["route"]["rules"].append({ "inbound": [in_tag], "outbound": out_tag })
 
-    # --- 住宅IP代理出口 / SOCKS5 服务注入（每台 VPS 默认开启，凭证统一取自环境变量）---
+    # --- 住宅IP代理出口 / SOCKS5 服务注入（如端口已被 proxy_server.py 占用则跳过，避免双进程抢端口炸 sing-box）---
     if proxy_cfg:
         if isinstance(proxy_cfg, dict):
             proxy_enabled = proxy_cfg.get("enabled", True)
@@ -404,18 +405,30 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None):
             proxy_enabled = bool(proxy_cfg)
             proxy_port, proxy_user, proxy_pass = PROXY_PORT, PROXY_USER, PROXY_PASS
         if proxy_enabled:
+            port_in_use = False
             try:
-                singbox_config["inbounds"].append({
-                    "type": "socks",
-                    "tag": "residential-socks5",
-                    "listen": "::",
-                    "listen_port": int(proxy_port),
-                    "users": [
-                        {"username": str(proxy_user), "password": str(proxy_pass)}
-                    ]
-                })
+                test = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                test.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                result = test.connect_ex(("127.0.0.1", int(proxy_port)))
+                test.close()
+                port_in_use = (result == 0)
             except Exception:
                 pass
+            if not port_in_use:
+                try:
+                    singbox_config["inbounds"].append({
+                        "type": "socks",
+                        "tag": "residential-socks5",
+                        "listen": "::",
+                        "listen_port": int(proxy_port),
+                        "users": [
+                            {"username": str(proxy_user), "password": str(proxy_pass)}
+                        ]
+                    })
+                except Exception:
+                    pass
+            else:
+                print(f"[agent] 端口 {proxy_port} 已被 proxy_server 占用，跳过 sing-box SOCKS5 注入", flush=True)
 
     try:
         for filename in os.listdir("/opt/kui/"):
