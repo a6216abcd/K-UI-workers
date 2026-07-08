@@ -67,29 +67,25 @@ if [ "$OS" = "alpine" ]; then
     apk add python3 curl openssl iptables ip6tables coreutils bash tar libc6-compat gcompat iproute2
     else
     apt-get update -y
-    apt-get install -y python3 curl openssl iptables ip6tables coreutils bash tar iproute2 iputils-ping
+    apt-get install -y python3 curl openssl iptables coreutils bash tar iproute2 iputils-ping
     fi
 
 echo "[4/6] ⚙️ 部署 Sing-box 代理核心..."
 if ! command -v sing-box >/dev/null 2>&1; then
-    if [ "$OS" = "alpine" ]; then
-        ARCH=$(uname -m)
-        case "$ARCH" in
-            x86_64) SB_ARCH="amd64" ;;
-            aarch64) SB_ARCH="arm64" ;;
-            *) echo "不支持的 CPU 架构: $ARCH"; exit 1 ;;
-        esac
-        SB_VER=$(curl -s -A "$CURL_USER_AGENT" "https://api.github.com/repos/SagerNet/sing-box/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-        [ -z "$SB_VER" ] && SB_VER=$(curl -sL -A "$CURL_USER_AGENT" "https://raw.githubusercontent.com/a62169722/KUI/main/docs/sing-box-version" 2>/dev/null)
-        [ -z "$SB_VER" ] && SB_VER="1.10.0"
-        curl -sLo sing-box.tar.gz -A "$CURL_USER_AGENT" "https://github.com/SagerNet/sing-box/releases/download/v${SB_VER}/sing-box-${SB_VER}-linux-${SB_ARCH}.tar.gz"
-        tar -xzf sing-box.tar.gz
-        mv sing-box-${SB_VER}-linux-${SB_ARCH}/sing-box /usr/bin/
-        chmod +x /usr/bin/sing-box
-        rm -rf sing-box.tar.gz sing-box-${SB_VER}-linux-${SB_ARCH}
-    else
-        bash <(curl -fsSL -A "$CURL_USER_AGENT" https://sing-box.app/deb-install.sh)
-    fi
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64) SB_ARCH="amd64" ;;
+        aarch64) SB_ARCH="arm64" ;;
+        *) echo "不支持的 CPU 架构: $ARCH"; exit 1 ;;
+    esac
+    SB_VER=$(curl -s -A "$CURL_USER_AGENT" "https://api.github.com/repos/SagerNet/sing-box/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+    [ -z "$SB_VER" ] && SB_VER=$(curl -sL -A "$CURL_USER_AGENT" "https://raw.githubusercontent.com/a62169722/KUI/main/docs/sing-box-version" 2>/dev/null)
+    [ -z "$SB_VER" ] && SB_VER="1.10.0"
+    curl -sLo sing-box.tar.gz -A "$CURL_USER_AGENT" "https://github.com/SagerNet/sing-box/releases/download/v${SB_VER}/sing-box-${SB_VER}-linux-${SB_ARCH}.tar.gz"
+    tar -xzf sing-box.tar.gz
+    mv sing-box-${SB_VER}-linux-${SB_ARCH}/sing-box /usr/bin/
+    chmod +x /usr/bin/sing-box
+    rm -rf sing-box.tar.gz sing-box-${SB_VER}-linux-${SB_ARCH}
 fi
 
 echo "[5/6] 📂 初始化 KUI 工作目录与环境..."
@@ -166,7 +162,28 @@ WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
     systemctl enable kui-agent
-    systemctl enable sing-box
+    if command -v sing-box >/dev/null 2>&1; then
+        if [ ! -f /etc/systemd/system/sing-box.service ]; then
+            cat > /etc/systemd/system/sing-box.service <<EOF
+[Unit]
+Description=Sing-box Proxy Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sing-box run -c /etc/sing-box/config.json
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+            systemctl daemon-reload
+        fi
+        systemctl enable sing-box
+        systemctl start sing-box
+    fi
     systemctl start kui-agent
 fi
 
