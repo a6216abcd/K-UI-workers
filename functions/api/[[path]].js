@@ -91,13 +91,21 @@ function parseHysteria2Link(raw) {
         let password = '';
         let host = '';
         let port = 443;
-        if (rest.includes('@')) {
-            const atIdx = rest.lastIndexOf('@');
-            password = decodeURIComponent(rest.slice(0, atIdx));
-            host = rest.slice(atIdx + 1);
+        const safeDecode = (s) => { try { return decodeURIComponent(s); } catch(e) { return s; } };
+        const findAt = (s) => {
+            const idx = s.lastIndexOf('@');
+            if (idx >= 0) return [idx, 1];
+            const encIdx = s.lastIndexOf('%40');
+            if (encIdx >= 0) return [encIdx, 3];
+            return [-1, 0];
+        };
+        const [atIdx, sepLen] = findAt(rest);
+        if (atIdx >= 0) {
+            password = safeDecode(rest.slice(0, atIdx));
+            host = safeDecode(rest.slice(atIdx + sepLen));
         } else {
             password = params.get('password') || '';
-            host = rest;
+            host = safeDecode(rest);
         }
         const colonIdx = host.lastIndexOf(':');
         if (colonIdx !== -1) {
@@ -107,7 +115,7 @@ function parseHysteria2Link(raw) {
                 host = host.slice(0, colonIdx);
             }
         }
-        const sni = params.get('sni') || host;
+        const sni = safeDecode(params.get('sni') || '') || host;
         const name = remark ? (() => { try { return decodeURIComponent(remark); } catch (e) { return remark; } })() : '';
         if (!host || isNaN(port)) return null;
         return {
@@ -871,7 +879,7 @@ export async function onRequest(context) {
             switch (node.protocol) {
                 case "VLESS": link = `vless://${node.uuid}@${node.vps_ip}:${node.port}?encryption=none&security=none&type=tcp#${remark}`; break;
                 case "XTLS-Reality": case "Reality": link = `vless://${node.uuid}@${node.vps_ip}:${node.port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${node.sni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=tcp&headerType=none#${remark}`; break;
-                case "Hysteria2": link = `hysteria2://${node.uuid}@${node.vps_ip}:${node.port}/?insecure=1&sni=${node.sni}&alpn=h3#${remark}`; break;
+                case "Hysteria2": link = `hysteria2://${node.uuid || node.private_key}@${node.vps_ip}:${node.port}/?insecure=1&sni=${node.sni}&alpn=h3#${remark}`; break;
                 case "TUIC": link = `tuic://${node.uuid}:${node.private_key}@${node.vps_ip}:${node.port}?sni=${node.sni}&congestion_control=bbr&alpn=h3&allow_insecure=1#${remark}`; break;
                 case "Trojan": link = `trojan://${node.private_key}@${node.vps_ip}:${node.port}?security=tls&sni=${node.sni}&allowInsecure=1&type=tcp#${remark}`; break;
                 case "H2-Reality": link = `vless://${node.uuid}@${node.vps_ip}:${node.port}?encryption=none&security=reality&sni=${node.sni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=http#${remark}`; break;
@@ -902,7 +910,7 @@ export async function onRequest(context) {
                 } else if (node.protocol === "Trojan") {
                     cProxy = `  - name: "${rawRemark}"\n    type: trojan\n    server: ${node.vps_ip}\n    port: ${node.port}\n    password: ${node.private_key}\n    udp: true\n    sni: ${node.sni}\n    skip-cert-verify: true`;
                 } else if (node.protocol === "Hysteria2") {
-                    cProxy = `  - name: "${rawRemark}"\n    type: hysteria2\n    server: ${node.vps_ip}\n    port: ${node.port}\n    password: ${node.uuid}\n    sni: ${node.sni}\n    skip-cert-verify: true`;
+                    cProxy = `  - name: "${rawRemark}"\n    type: hysteria2\n    server: ${node.vps_ip}\n    port: ${node.port}\n    password: ${node.uuid || node.private_key}\n    sni: ${node.sni}\n    skip-cert-verify: true`;
                 } else if (node.protocol === "TUIC") {
                     cProxy = `  - name: "${rawRemark}"\n    type: tuic\n    server: ${node.vps_ip}\n    port: ${node.port}\n    uuid: ${node.uuid}\n    password: ${node.private_key}\n    sni: ${node.sni}\n    skip-cert-verify: true`;
                 }
