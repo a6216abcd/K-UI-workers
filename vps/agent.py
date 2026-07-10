@@ -140,6 +140,35 @@ def ensure_firewall_open(port):
         if subprocess.run("command -v ufw", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
             subprocess.run(f"ufw allow {port}/{protocol} >/dev/null 2>&1", shell=True)
 
+def _read_iptables_port_bytes(port):
+    """基于 ensure_firewall_open 插入的 dport(INPUT)/sport(OUTPUT) ACCEPT 规则，
+    读取该端口的进出累计字节，实现真正的单节点精确计量。
+    返回 None 表示未找到规则或读取失败（上层据此返回 0，避免误计）。"""
+    port_s = str(port)
+    total = 0
+    found = False
+    for tool, chain, key in (
+        ("iptables", "INPUT", f"dpt:{port_s}"), ("iptables", "OUTPUT", f"spt:{port_s}"),
+        ("ip6tables", "INPUT", f"dpt:{port_s}"), ("ip6tables", "OUTPUT", f"spt:{port_s}"),
+    ):
+        try:
+            out = subprocess.run([tool, "-nvxL", chain], capture_output=True, text=True, timeout=3).stdout
+        except Exception:
+            continue
+        for line in out.splitlines():
+            if "ACCEPT" not in line or key not in line:
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            try:
+                # iptables -nvx 列序: pkts bytes target ...
+                total += int(parts[1])
+                found = True
+            except Exception:
+                pass
+    return total if found else None
+
 def get_port_traffic(port, protocol="tcp"):
     ensure_firewall_open(port)
 
@@ -174,23 +203,12 @@ def get_port_traffic(port, protocol="tcp"):
         except Exception:
             pass
 
-    # 兜底：系统网卡累计流量（非单端口，但彻底消除 iptables 轮询开销）
-    try:
-        rx = tx = 0
-        for iface in os.listdir("/sys/class/net/"):
-            if iface == "lo":
-                continue
-            try:
-                with open(f"/sys/class/net/{iface}/statistics/tx_bytes") as f:
-                    tx += int(f.read().strip())
-                with open(f"/sys/class/net/{iface}/statistics/rx_bytes") as f:
-                    rx += int(f.read().strip())
-            except Exception:
-                continue
-        if rx > 0 or tx > 0:
-            return rx + tx
-    except Exception:
-        pass
+    # 兜底：iptables 单端口累计字节（真正的单节点计量）。
+    # 注意：绝不能回退到"系统全网卡总流量"——那样每个节点都会拿到同一个总量，
+    # report_status 里逐节点累加会把用户流量放大 N 倍（N=节点数）。
+    port_bytes = _read_iptables_port_bytes(port)
+    if port_bytes is not None:
+        return port_bytes
 
     return 0
 

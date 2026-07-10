@@ -896,14 +896,14 @@ export async function onRequest(context) {
                 case "AnyTLS": link = `anytls://${node.private_key}@${nodeIp}:${node.port}?security=tls&sni=${nodeSni}&insecure=1#${remark}`; break;
                 case "Naive": link = `naive+https://${node.uuid}:${node.private_key}@${nodeIp}:${node.port}?security=tls&sni=${nodeSni}#${remark}`; break;
                 case "Socks5": link = `socks5://${btoa(`${node.uuid}:${node.private_key}`)}@${nodeIp}:${node.port}#${remark}`; break;
-                case "VLESS-Argo": if (!node.sni.includes('等待')) link = `vless://${node.uuid}@${node.sni}:443?encryption=none&security=tls&type=ws&host=${node.sni}&path=%2F#${remark}-Argo`; break;
+                case "VLESS-Argo": if (!(node.sni || '').includes('等待')) link = `vless://${node.uuid}@${node.sni}:443?encryption=none&security=tls&type=ws&host=${node.sni}&path=%2F#${remark}-Argo`; break;
             }
             if (link) subLinks.push(link);
 
             // --- 动态拼装 Clash YAML 代理字典 (支持 Clash Meta / Mihomo) ---
             if (format === 'clash') {
                 if (node.protocol.includes("VLESS") || node.protocol.includes("Reality")) {
-                    const serverIpOrSni = (node.protocol === 'VLESS-Argo' && !node.sni.includes('等待')) ? node.sni : nodeIp;
+                    const serverIpOrSni = (node.protocol === 'VLESS-Argo' && !(node.sni || '').includes('等待')) ? node.sni : nodeIp;
                     const serverPort = node.protocol === 'VLESS-Argo' ? 443 : node.port;
                     cProxy = `  - name: "${rawRemark}"\n    type: vless\n    server: ${serverIpOrSni}\n    port: ${serverPort}\n    uuid: ${node.uuid}\n    udp: true`;
                     
@@ -913,7 +913,7 @@ export async function onRequest(context) {
                         cProxy += `\n    tls: true\n    servername: ${nodeSni}\n    client-fingerprint: chrome\n    network: grpc\n    grpc-opts:\n      grpc-service-name: grpc\n    reality-opts:\n      public-key: ${node.public_key}\n      short-id: ${node.short_id || ""}`;
                     } else if (node.protocol === "H2-Reality") {
                         cProxy += `\n    tls: true\n    servername: ${nodeSni}\n    client-fingerprint: chrome\n    network: h2\n    h2-opts:\n      host:\n        - ${nodeSni || nodeIp}\n      path: "/"`;
-                    } else if (node.protocol === 'VLESS-Argo' && !node.sni.includes('等待')) {
+                    } else if (node.protocol === 'VLESS-Argo' && !(node.sni || '').includes('等待')) {
                         cProxy += `\n    tls: true\n    servername: ${nodeSni}\n    network: ws\n    ws-opts:\n      path: "/"\n      headers:\n        Host: ${nodeSni}`;
                     }
                 } else if (node.protocol === "Trojan") {
@@ -971,7 +971,7 @@ export async function onRequest(context) {
                         cProxy = `  - name: "${node.name || 'TP'}"\n    type: vless\n    server: ${thirdIp}\n    port: ${node.port}\n    uuid: ${node.uuid}\n    udp: true`;
                         if (isReality) {
                             cProxy += `\n    tls: true\n    servername: ${thirdSni}\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: ${node.public_key || ''}\n      short-id: ${node.short_id || ""}`;
-                            if (((node.protocol === "Reality" || node.protocol === "XTLS-Reality") && node.flow && node.flow.includes('rprx')) || node.protocol === "VLSS") {
+                            if (((node.protocol === "Reality" || node.protocol === "XTLS-Reality") && node.flow && node.flow.includes('rprx')) || node.protocol === "VLESS") {
                                 cProxy += `\n    flow: ${node.flow || 'xtls-rprx-vision'}`;
                             }
                             const net = node.network || 'tcp';
