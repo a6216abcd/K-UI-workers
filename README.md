@@ -29,11 +29,11 @@
 
 ---
 
-DEV修复情况
+DEV 修复情况
 
-2026/07/10  已修复手机端网页显示异常问题 
-
-2026/07/09  已修复clash订阅问题   已修复socks5填写输入回退问题
+- 2026/07/12：完成独立 Agent Token、统一 Agent/住宅代理组件热更新、住宅代理双隧道恢复及安装链路加固
+- 2026/07/10：修复手机端网页显示异常
+- 2026/07/09：修复 Clash 订阅和 SOCKS5 输入回退
 
 # ⚡ KUI x Server Monitor Pro - 无服务器集群网关
 
@@ -73,7 +73,8 @@ DEV修复情况
 
 - **主备双活调度**：内置主备双路隧道（`tun_main` / `tun_backup`），通道故障软开关秒切
 - **全量国家代码库**：预设 + 实时网络探测，提供最全面的目标锁定选择
-- **直链提取 API**：`/api/proxies` 端点直出可用代理，支持外部程序调用
+- **鉴权代理提取**：管理员或对应 VPS Agent 可通过 `/api/proxy/proxies` 获取可用代理
+- **安全热更新**：管理器与代理服务器每小时鉴权检查更新，验证 SHA256 和 Python 语法后原子替换
 
 ### 🛠 终极单轨架构
 
@@ -103,6 +104,7 @@ DEV修复情况
 - 一个 [GitHub](https://github.com) 账号
 - 一个 [Cloudflare](https://dash.cloudflare.com) 账号（免费版即可）
 - 一台或多台 VPS（Ubuntu 18-24 / Debian 10-13 / Alpine Linux）
+- 住宅代理需要 VPS 支持 `/dev/net/tun`；若供外部设备连接，应在云防火墙和系统防火墙中仅对可信来源开放代理端口（默认 `7920/TCP`）
 
 ---
 
@@ -134,8 +136,9 @@ DEV修复情况
    - **Build command**：留空（`None`）
    - **Build output directory**：填写 `/`（根目录）
    - **Root directory**：保持默认 `/`
-5. 点击 **Save and Deploy**
-6. 等待部署完成（通常 1-2 分钟），Cloudflare 会分配给您一个 `*.pages.dev` 域名
+5. 生产分支选择本仓库当前使用的分支（例如 `dev`）；后续推送到该分支才会触发生产部署
+6. 点击 **Save and Deploy**
+7. 等待部署完成（通常 1-2 分钟），Cloudflare 会分配给您一个 `*.pages.dev` 域名
 
 ---
 
@@ -150,8 +153,8 @@ DEV修复情况
 2. **环境变量**（Environment Variables）：
    | 变量名 | 说明 | 默认值 | 必填 |
    |---|---|---|---|
-   | `ADMIN_USERNAME` | 后台登录账号 | `admin` | ✅ |
-   | `ADMIN_PASSWORD` | 后台登录密码 | `admin` | ✅ |
+   | `ADMIN_USERNAME` | 后台登录账号 | 不建议使用默认值 | ✅ |
+   | `ADMIN_PASSWORD` | 后台强密码 | 不建议使用默认值 | ✅ |
    | `TG_BOT_TOKEN` | Telegram 机器人 Token | - | ❌ |
    | `TG_CHAT_ID` | 接收告警的 Telegram Chat ID | - | ❌ |
    | `TG_WEBHOOK_SECRET` | Telegram Webhook 校验密钥，启用 TG 管理时必填 | - | ❌ |
@@ -159,8 +162,14 @@ DEV修复情况
    | `LEGACY_AGENT_AUTH` | 设为 `false` 可提前关闭旧 Agent 迁移兼容 | 临时启用至 2026-08-01 | ❌ |
    | `PROXY_USER` | 住宅 SOCKS5 用户名，启用住宅代理时必须显式配置 | - | ❌ |
    | `PROXY_PASS` | 住宅 SOCKS5 强密码，启用住宅代理时必须显式配置 | - | ❌ |
+   | `PROXY_CTRL_URL` | 使用外部住宅代理控制器时填写其根 URL；内置 D1 控制器留空 | - | ❌ |
+   | `PROXY_CTRL_TOKEN` | 外部控制器专用 Token | - | ❌ |
+   | `PROXY_CTRL_USER` | 外部控制器 Basic Auth 用户名 | - | ❌ |
+   | `PROXY_CTRL_PASS` | 外部控制器 Basic Auth 密码 | - | ❌ |
 
-> ⚠️ **安全提示**：部署完成后请立即修改默认密码！
+> ⚠️ **安全提示**：不要使用 `admin/admin`、`proxy/888888` 等默认凭据。`PROXY_USER` 和 `PROXY_PASS` 未配置时，内置住宅代理 API 会返回 `503`，代理监听器也会拒绝连接。
+
+> Cloudflare 的 **Production** 与 **Preview** 环境变量、D1 绑定相互独立。若生产分支为 `dev`，请确认该分支对应环境已经绑定 `DB` 并配置上述变量。修改变量后必须重新部署。
 
 ---
 
@@ -173,7 +182,7 @@ DEV修复情况
 
 ---
 
-## 💻 接入 VPS 节点（Agent 安装）
+## 💻 接入 VPS 节点（统一 Agent）
 
 KUI 与探针已实现终极融合，您只需执行一次操作：
 
@@ -188,13 +197,13 @@ KUI 与探针已实现终极融合，您只需执行一次操作：
 
 ### 2. 获取部署指令
 
-在刚刚添加的服务器卡片底部，系统会生成专属的 **Deploy Command (安装指令)**：
+在刚刚添加的服务器卡片底部，系统会签发服务器专属 `agent_token` 并生成 **Deploy Command**。不要自行使用管理员密码或管理员密码哈希替代该 Token。
 
 ```bash
-bash <(curl -sL --ipv4 https://您的域名/vps/kui.sh) \
+bash <(curl -fsSL --ipv4 https://您的域名/vps/kui.sh) \
   --api https://您的域名 \
   --ip 您的VPS_IP \
-  --token 您的Token
+  --token 服务器专属AgentToken
 ```
 
 ### 3. 执行安装
@@ -203,16 +212,16 @@ bash <(curl -sL --ipv4 https://您的域名/vps/kui.sh) \
 
 ```bash
 # Ubuntu / Debian
-bash <(curl -sL --ipv4 https://您的域名/vps/kui.sh) \
+bash <(curl -fsSL --ipv4 https://您的域名/vps/kui.sh) \
   --api https://您的域名 \
   --ip 1.2.3.4 \
-  --token 您的Token
+  --token 服务器专属AgentToken
 
 # Alpine Linux
 curl -fsSL --ipv4 https://您的域名/vps/kui.sh | sh -s -- \
   --api https://您的域名 \
   --ip 1.2.3.4 \
-  --token 您的Token
+  --token 服务器专属AgentToken
 ```
 
 安装脚本会自动完成以下操作：
@@ -222,6 +231,7 @@ curl -fsSL --ipv4 https://您的域名/vps/kui.sh | sh -s -- \
 - 部署 Sing-box 代理核心
 - 初始化 KUI 工作目录
 - 下载并启动全能 Python Agent
+- 通过鉴权更新端点下载当前 Agent，并校验 SHA256 与 Python 语法
 - 注册为系统守护进程（systemd / OpenRC）
 
 ### 4. 验证接入
@@ -235,6 +245,142 @@ curl -fsSL --ipv4 https://您的域名/vps/kui.sh | sh -s -- \
 > Pages Functions 不直接运行 Cron Trigger。需要离线告警时，请让 Cloudflare Worker Cron、UptimeRobot 或其他定时服务每分钟 `POST https://您的域名/api/cron_check`，并携带请求头 `Authorization: Bearer <CRON_SECRET>`。
 
 您可以直接在面板使用 **🚀 爆发下发** 功能，10 秒内部署 8 大节点阵列！
+
+### 5. Agent 服务验证
+
+```bash
+# Debian / Ubuntu
+systemctl is-active kui-agent sing-box
+journalctl -u kui-agent -n 50 --no-pager
+stat -c '%a %n' /opt/kui/config.json /etc/sing-box/config.json
+
+# Alpine / OpenRC
+rc-service kui-agent status
+rc-service sing-box status
+logread | tail -n 50
+stat -c '%a %n' /opt/kui/config.json /etc/sing-box/config.json
+```
+
+安装后等待 10-30 秒再执行验证。预期结果：两个服务均正常运行，配置文件权限为 `600`，面板中的服务器心跳持续更新。
+
+---
+
+## 🌐 部署住宅 IP 双隧道代理
+
+住宅代理是独立的 Python 服务 `proxy-lite`，必须在统一 Agent 已接入后安装。它复用同一台服务器的专属 Agent Token，不使用管理员登录凭据。
+
+### 1. 配置 Pages 环境变量
+
+至少配置：
+
+```text
+PROXY_USER=自定义用户名
+PROXY_PASS=随机强密码
+```
+
+修改环境变量后重新部署 Pages，并确认后台 **住宅IP代理** 页面可以正常读取配置。
+
+如果要从其他设备访问 SOCKS5，请仅向可信客户端 IP 放行 `7920/TCP`。不要将代理端口无来源限制地暴露到公网。
+
+### 2. 获取服务器专属参数
+
+在后台 **服务器与节点** 页面找到目标 VPS，复制该服务器当前部署命令中的 `--ip` 和 `--token`。Token 必须与该 IP 对应。
+
+### 3. 安装或升级住宅代理
+
+```bash
+# Debian / Ubuntu
+bash <(curl -fsSL https://您的域名/vps/residential-proxy.sh) \
+  --domain https://您的域名 \
+  --controller https://您的域名 \
+  --ip 您的VPS_IP \
+  --token 服务器专属AgentToken
+
+# Alpine（住宅代理脚本需要 Bash，不能用 sh 执行）
+apk add --no-cache bash curl
+curl -fsSL --ipv4 https://您的域名/vps/residential-proxy.sh | bash -s -- \
+  --domain https://您的域名 \
+  --controller https://您的域名 \
+  --ip 您的VPS_IP \
+  --token 服务器专属AgentToken
+```
+
+脚本会：
+
+- 安装 OpenVPN、Python、iptables 和网络依赖
+- 在替换文件前停止旧 `proxy-lite`，避免 systemd 重启风暴
+- 通过 `/api/agent_update` 鉴权下载 `lite_manager.py` 和 `proxy_server.py`
+- 校验响应 SHA256 和 Python 语法
+- 将 Token 与本地凭据写入 `/etc/proxy-lite/env`，权限设为 `600`
+- 创建 systemd/OpenRC 服务
+- 建立 `tun_main`（ACTIVE）和 `tun_backup`（STANDBY）
+- 此后每小时自动检查住宅代理组件更新
+
+### 4. 验证双隧道
+
+```bash
+# Debian / Ubuntu
+systemctl is-active proxy-lite
+journalctl -u proxy-lite -n 100 --no-pager
+ip -brief address show tun_main
+ip -brief address show tun_backup
+pgrep -a openvpn
+stat -c '%a %n' /etc/proxy-lite/env
+
+# Alpine / OpenRC
+rc-service proxy-lite status
+logread | tail -n 100
+ip -brief address show tun_main
+ip -brief address show tun_backup
+pgrep -a openvpn
+stat -c '%a %n' /etc/proxy-lite/env
+```
+
+预期结果：
+
+- `proxy-lite` 为 `active`
+- `tun_main` 和 `tun_backup` 都有隧道地址
+- 存在两个 OpenVPN 进程
+- 后台 **活跃节点矩阵** 显示 `2 / 2`
+- 一条隧道标记为 ACTIVE，另一条标记为 STANDBY
+- `/etc/proxy-lite/env` 权限为 `600`
+
+### 5. 验证 SOCKS5 出口
+
+请使用 Pages 中配置的 `PROXY_USER/PROXY_PASS`：
+
+```bash
+curl -fsS --max-time 30 \
+  --proxy socks5h://127.0.0.1:7920 \
+  --proxy-user 'PROXY_USER:PROXY_PASS' \
+  https://api.ipify.org
+```
+
+返回值应是当前 ACTIVE 住宅出口 IP，而不是 VPS 本机公网 IP。
+
+---
+
+## 🔄 历史 VPS 迁移与热更新
+
+### 从旧管理员哈希 Token 迁移
+
+旧版部署曾将管理员密码哈希写入 `/opt/kui/config.json`。新版会在兼容窗口内恢复上报，并在成功拉取配置后自动将服务器专属 Token 原子写回本地。
+
+仍建议在 **2026-08-01 前**逐台重新执行面板当前生成的统一 Agent 部署命令，并重新执行住宅代理安装命令。全部迁移后设置：
+
+```text
+LEGACY_AGENT_AUTH=false
+```
+
+### 热更新范围
+
+以下组件每小时通过鉴权端点检查更新：
+
+- `/opt/kui/agent.py`
+- `/opt/proxy_lite/lite_manager.py`
+- `/opt/proxy_lite/proxy_server.py`
+
+更新流程为：下载到临时文件 → 限制体积 → 校验 SHA256 → `py_compile` → 原子替换 → 进程自重载。公开 `/vps/*.py` 可能受 CDN 缓存影响，安装器和热更新均不依赖该公开路径。
 
 ---
 
@@ -320,7 +466,7 @@ A: 请检查 Pages 项目的 **Settings → Functions → D1 database bindings**
 
 **Q: Agent 安装失败或下载超时？**
 
-A: 可能是 GitHub 限流导致 agent.py 下载失败。脚本会自动重试备用源，请稍等片刻后重新运行安装命令。也可以手动将 `vps/agent.py` 上传到 VPS 的 `/opt/kui/` 目录。
+A: 新安装器从 Pages 的鉴权更新端点下载，不再依赖 GitHub Raw 或公开静态 Python 缓存。请检查服务器 IP 是否已在面板登记、`--token` 是否为该服务器专属 Token，以及 VPS 能否出站访问 Pages 域名。
 
 **Q: 探针数据不上报？**
 
@@ -328,6 +474,25 @@ A: 请检查：
 1. VPS 上 `kui-agent` 服务是否正常运行：`systemctl status kui-agent`
 2. 防火墙是否放行出站 HTTPS（443 端口）
 3. `/opt/kui/config.json` 中的 `api_url` 和 `token` 是否正确
+
+**Q: 住宅代理后台显示 `0 / 2`？**
+
+A: 依次检查：
+
+1. `systemctl status proxy-lite`
+2. `journalctl -u proxy-lite -n 150 --no-pager`
+3. 是否出现 `/api/proxy/config` 的 `401/403`；出现时请重新执行服务器专属住宅代理安装命令
+4. `ip -brief address show tun_main` 和 `tun_backup`
+5. `/dev/net/tun` 是否存在
+6. Pages 是否配置 `PROXY_USER`、`PROXY_PASS`
+
+**Q: 推送 GitHub 后 VPS 为什么没有更新？**
+
+A: 旧 Agent 没有热更新能力，必须执行一次新版部署命令完成引导。新版统一 Agent和住宅代理组件每小时自动更新。GitHub 推送还必须触发 Pages 生产分支部署；仅推送到未绑定的分支不会更新生产环境。
+
+**Q: Pages 已更新，但 `/vps/*.py` 看起来还是旧内容？**
+
+A: 公开静态 Python 路径可能存在 CDN 缓存。新版安装器与热更新使用带专属 Token 的 `/api/agent_update`，响应为 `no-store` 并带 `X-Agent-SHA256`，不依赖公开静态路径。
 
 **Q: 支持哪些系统？**
 

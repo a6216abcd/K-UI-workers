@@ -145,16 +145,15 @@ API_URL="$API_URL" VPS_IP="$VPS_IP" TOKEN="$TOKEN" PROXY_API_URL="${PROXY_API_UR
 chmod 600 /opt/kui/config.json
 
 echo "正在拉取最新版 Agent 执行器..."
-AGENT_URL="${API_URL}/vps/agent.py"
-# 校验下载内容确实是 Python（含 import 且不是 GitHub 429/HTML 错误页）
-is_valid_py() { [ -s "$1" ] && grep -q "import " "$1" && ! grep -qiE "429|too many requests|<html" "$1"; }
-fetch_agent() { curl -fsSL --retry 3 --retry-delay 2 -A "$CURL_USER_AGENT" "$1" -o /opt/kui/agent.py; }
-rm -f /opt/kui/agent.py
-fetch_agent "$AGENT_URL"
-if ! is_valid_py /opt/kui/agent.py; then
-    echo "❌ 下载 agent.py 失败：请确认面板已部署 /vps/agent.py。"; exit 1;
-fi
-python3 -m py_compile /opt/kui/agent.py
+AGENT_URL="${API_URL}/api/agent_update?ip=${VPS_IP}&component=agent"
+AGENT_TEMP="/opt/kui/agent.py.download"; AGENT_HEADERS="/opt/kui/agent.py.headers"
+curl -fsSL --retry 3 --retry-delay 2 -A "$CURL_USER_AGENT" -D "$AGENT_HEADERS" -H "Authorization: ${TOKEN}" "$AGENT_URL" -o "$AGENT_TEMP"
+EXPECTED_AGENT_SHA=$(tr -d '\r' < "$AGENT_HEADERS" | awk '/^[Xx]-[Aa]gent-[Ss][Hh][Aa]256:/ {print tolower($2)}' | tail -n 1)
+ACTUAL_AGENT_SHA=$(sha256sum "$AGENT_TEMP" | awk '{print $1}')
+[ -n "$EXPECTED_AGENT_SHA" ] && [ "$EXPECTED_AGENT_SHA" = "$ACTUAL_AGENT_SHA" ] || { echo "❌ agent.py SHA256 校验失败"; exit 1; }
+python3 -m py_compile "$AGENT_TEMP"
+mv "$AGENT_TEMP" /opt/kui/agent.py
+rm -f "$AGENT_HEADERS"
 chmod 700 /opt/kui/agent.py
 
 echo "[6/6] 🛡️ 智能注册底层守护进程并启动..."
