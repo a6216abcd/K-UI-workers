@@ -167,14 +167,17 @@ download_agents() {
     mkdir -p /opt/proxy_lite/configs
     cd /opt/proxy_lite
 
-    curl -fSL --retry 3 --retry-delay 2 -o lite_manager.py "${DOMAIN}/vps/lite_manager.py" || {
-        echo "❌ 下载 lite_manager.py 失败，请检查域名: ${DOMAIN}/vps/lite_manager.py"
-        exit 1
+    download_component() {
+        COMPONENT="$1"; TARGET="$2"; TEMP_FILE="${TARGET}.download"; HEADER_FILE="${TARGET}.headers"
+        curl -fSL --retry 3 --retry-delay 2 -D "$HEADER_FILE" -H "Authorization: ${AGENT_TOKEN}" -o "$TEMP_FILE" "${DOMAIN}/api/agent_update?ip=${VPS_IP}&component=${COMPONENT}" || return 1
+        EXPECTED_SHA=$(tr -d '\r' < "$HEADER_FILE" | awk '/^[Xx]-[Aa]gent-[Ss][Hh][Aa]256:/ {print tolower($2)}' | tail -n 1)
+        ACTUAL_SHA=$(sha256sum "$TEMP_FILE" | awk '{print $1}')
+        [ -n "$EXPECTED_SHA" ] && [ "$EXPECTED_SHA" = "$ACTUAL_SHA" ] || { echo "❌ ${COMPONENT} SHA256 校验失败"; return 1; }
+        mv "$TEMP_FILE" "$TARGET"
+        rm -f "$HEADER_FILE"
     }
-    curl -fSL --retry 3 --retry-delay 2 -o proxy_server.py "${DOMAIN}/vps/proxy_server.py" || {
-        echo "❌ 下载 proxy_server.py 失败，请检查域名: ${DOMAIN}/vps/proxy_server.py"
-        exit 1
-    }
+    download_component proxy-manager lite_manager.py || { echo "❌ 下载 lite_manager.py 失败"; exit 1; }
+    download_component proxy-server proxy_server.py || { echo "❌ 下载 proxy_server.py 失败"; exit 1; }
     python3 -m py_compile lite_manager.py proxy_server.py || {
         echo "❌ 下载的代理引擎不是有效 Python 文件"
         exit 1
