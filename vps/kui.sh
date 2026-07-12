@@ -45,7 +45,7 @@ echo "=========================================="
 
 export CURL_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
 
-echo "[1/6] 🧹 正在清理历史残留..."
+echo "[1/7] 🧹 正在清理历史残留..."
 if [ "$OS" = "alpine" ]; then
     rc-service kui-agent stop >/dev/null 2>&1 || true
     rc-service sing-box stop >/dev/null 2>&1 || true
@@ -60,14 +60,14 @@ else
 fi
 rm -rf /opt/kui /etc/sing-box/config.json
 
-echo "[2/6] ⚡ 保留系统现有软件源..."
+echo "[2/7] ⚡ 保留系统现有软件源..."
 if [ "$OS" = "alpine" ]; then
     :
 else
     :
 fi
 
-echo "[3/6] 📦 正在安装底层网络依赖..."
+echo "[3/7] 📦 正在安装底层网络依赖..."
 ALIYUN_OK=0
 if [ "$OS" = "alpine" ]; then
     apk update || echo "⚠️ apk update 失败，尝试使用现有缓存安装。"
@@ -90,7 +90,7 @@ else
     apt-get install -y python3 curl openssl iptables coreutils bash tar iproute2 iputils-ping
 fi
 
-echo "[4/6] ⚙️ 部署 Sing-box 代理核心..."
+echo "[4/7] ⚙️ 部署 Sing-box 代理核心..."
 rm -f /usr/bin/sing-box
 ARCH=$(uname -m)
 case "$ARCH" in
@@ -117,7 +117,7 @@ mv "sing-box-${SB_VER}-${SB_SUFFIX}/sing-box" /usr/bin/
 chmod +x /usr/bin/sing-box
 rm -rf sing-box.tar.gz "sing-box-${SB_VER}-${SB_SUFFIX}"
 
-echo "[4.5/6] ⚙️ 正在应用网络内核调优（BBR / QUIC / conntrack）..."
+echo "[4.5/7] ⚙️ 正在应用网络内核调优（BBR / QUIC / conntrack）..."
 if [ "$OS" = "alpine" ]; then
     modprobe -q xt_conntrack 2>/dev/null || true
     sysctl -w net.netfilter.nf_conntrack_max=1048576 >/dev/null 2>&1 || true
@@ -138,7 +138,7 @@ SYSCTL
     sysctl --system >/dev/null 2>&1 || echo "⚠️ 部分内核参数无法应用，继续安装。"
 fi
 
-echo "[5/6] 📂 初始化 KUI 工作目录与环境..."
+echo "[5/7] 📂 初始化 KUI 工作目录与环境..."
 mkdir -p /opt/kui /etc/sing-box
 
 API_URL="$API_URL" VPS_IP="$VPS_IP" TOKEN="$TOKEN" PROXY_API_URL="${PROXY_API_URL:-}" python3 -c 'import json, os; json.dump({"api_url": os.environ["API_URL"] + "/api/config", "report_url": os.environ["API_URL"] + "/api/report", "ip": os.environ["VPS_IP"], "token": os.environ["TOKEN"], "proxy_api": os.environ["PROXY_API_URL"]}, open("/opt/kui/config.json", "w"))'
@@ -156,7 +156,7 @@ mv "$AGENT_TEMP" /opt/kui/agent.py
 rm -f "$AGENT_HEADERS"
 chmod 700 /opt/kui/agent.py
 
-echo "[6/6] 🛡️ 智能注册底层守护进程并启动..."
+echo "[6/7] 🛡️ 智能注册底层守护进程并启动..."
 if [ "$OS" = "alpine" ]; then
     cat > /etc/init.d/kui-agent <<EOF
 #!/sbin/openrc-run
@@ -226,8 +226,25 @@ EOF
     systemctl start kui-agent
 fi
 
+echo "[7/7] 🌐 部署住宅 IP 主备双隧道代理..."
+PROXY_INSTALLER_URL="${API_URL}/api/agent_update?ip=${VPS_IP}&component=proxy-installer"
+PROXY_INSTALLER_TEMP="/opt/kui/residential-proxy.sh.download"; PROXY_INSTALLER_HEADERS="/opt/kui/residential-proxy.sh.headers"
+cleanup_proxy_installer() { rm -f "$PROXY_INSTALLER_TEMP" "$PROXY_INSTALLER_HEADERS"; }
+trap cleanup_proxy_installer EXIT INT TERM
+curl -fsSL --retry 3 --retry-delay 2 -A "$CURL_USER_AGENT" -D "$PROXY_INSTALLER_HEADERS" -H "Authorization: ${TOKEN}" "$PROXY_INSTALLER_URL" -o "$PROXY_INSTALLER_TEMP"
+EXPECTED_INSTALLER_SHA=$(tr -d '\r' < "$PROXY_INSTALLER_HEADERS" | awk '/^[Xx]-[Aa]gent-[Ss][Hh][Aa]256:/ {print tolower($2)}' | tail -n 1)
+PROXY_CONTROLLER_MODE=$(tr -d '\r' < "$PROXY_INSTALLER_HEADERS" | awk '/^[Xx]-[Pp]roxy-[Cc]ontroller-[Mm]ode:/ {print tolower($2)}' | tail -n 1)
+[ "$PROXY_CONTROLLER_MODE" != "external" ] || { echo "❌ 当前配置使用外部住宅控制器，请使用其专用凭据单独部署住宅组件。"; exit 1; }
+ACTUAL_INSTALLER_SHA=$(sha256sum "$PROXY_INSTALLER_TEMP" | awk '{print $1}')
+[ -n "$EXPECTED_INSTALLER_SHA" ] && [ "$EXPECTED_INSTALLER_SHA" = "$ACTUAL_INSTALLER_SHA" ] || { echo "❌ residential-proxy.sh SHA256 校验失败"; exit 1; }
+bash -n "$PROXY_INSTALLER_TEMP"
+chmod 700 "$PROXY_INSTALLER_TEMP"
+bash "$PROXY_INSTALLER_TEMP" --domain "$API_URL" --controller "$API_URL" --ip "$VPS_IP" --token "$TOKEN"
+cleanup_proxy_installer
+trap - EXIT INT TERM
+
 echo "=========================================="
-echo " 🎉 KUI Agent 跨平台部署成功！"
+echo " 🎉 KUI + 住宅 IP 双隧道代理部署成功！"
 echo " 节点 IP: ${VPS_IP}"
 echo " 系统架构: ${OS}"
 echo "=========================================="

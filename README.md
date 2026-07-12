@@ -43,9 +43,9 @@ DEV 修复情况
 ![D1 Database](https://img.shields.io/badge/Database-Cloudflare%20D1-4285F4?logo=cloudflare)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 
-这是 **KUI 代理聚合面板** 与 **Server Monitor Pro 全景探针系统** 的无服务器终极融合方案。
+这是 **KUI 代理聚合面板**、**Server Monitor Pro 全景探针系统** 与**住宅 IP 双隧道代理**的一体化无服务器方案。
 
-仅需一次 Cloudflare Pages 部署，即可获得一个高可用、零服务器成本的集群管理中心。通过全新重构的**全能 Python Agent**，您只需在 VPS 上执行**一条命令**，即可同时完成 **"8合1防封代理矩阵下发"** 与 **"深度系统性能探针监控"**。
+仅需一次 Cloudflare Pages 部署，即可获得一个高可用、零服务器成本的集群管理中心。您只需在 VPS 上执行**一条 Full Deploy Command**，即可同时完成 **8合1代理矩阵、深度系统探针、住宅 IP ACTIVE/STANDBY 双隧道**的安装与守护。
 
 > 本项目基于 [CF-Server-Monitor-Pro](https://github.com/a63414262/CF-Server-Monitor-Pro) 及 [sing-box](https://github.com/SagerNet/sing-box) 加速实现，感谢开源社区的贡献。
 
@@ -182,9 +182,11 @@ DEV 修复情况
 
 ---
 
-## 💻 接入 VPS 节点（统一 Agent）
+## 💻 一条命令接入完整 VPS
 
-KUI 与探针已实现终极融合，您只需执行一次操作：
+KUI、探针、sing-box 与住宅代理已经合并为一次部署流程，不需要再执行第二条住宅代理命令。
+
+> Full Deploy Command 面向默认内置 D1 住宅控制器。若配置了外部 `PROXY_CTRL_URL`，外部控制器通常使用独立 Token/Basic Auth，统一安装器会明确停止住宅阶段；请使用外部控制器的专用凭据执行高级独立部署。
 
 ### 1. 在面板添加服务器
 
@@ -233,6 +235,10 @@ curl -fsSL --ipv4 https://您的域名/vps/kui.sh | sh -s -- \
 - 下载并启动全能 Python Agent
 - 通过鉴权更新端点下载当前 Agent，并校验 SHA256 与 Python 语法
 - 注册为系统守护进程（systemd / OpenRC）
+- 鉴权下载住宅代理安装组件并校验 SHA256
+- 安装 OpenVPN 与 TUN 依赖
+- 部署 `proxy-lite`、`tun_main` 和 `tun_backup`
+- 自动处理 sing-box 与住宅代理的端口接管
 
 ### 4. 验证接入
 
@@ -250,24 +256,25 @@ curl -fsSL --ipv4 https://您的域名/vps/kui.sh | sh -s -- \
 
 ```bash
 # Debian / Ubuntu
-systemctl is-active kui-agent sing-box
+systemctl is-active kui-agent sing-box proxy-lite
 journalctl -u kui-agent -n 50 --no-pager
 stat -c '%a %n' /opt/kui/config.json /etc/sing-box/config.json
 
 # Alpine / OpenRC
 rc-service kui-agent status
 rc-service sing-box status
+rc-service proxy-lite status
 tail -n 50 /var/log/kui-agent.log
 stat -c '%a %n' /opt/kui/config.json /etc/sing-box/config.json
 ```
 
-安装后等待 10-30 秒再执行验证。预期结果：两个服务均正常运行，配置文件权限为 `600`，面板中的服务器心跳持续更新。
+安装后等待 30-90 秒再执行验证。预期结果：三个服务均正常运行，配置文件权限为 `600`，服务器心跳持续更新，住宅代理页面最终显示 `2 / 2`。
 
 ---
 
-## 🌐 部署住宅 IP 双隧道代理
+## 🌐 住宅 IP 双隧道代理
 
-住宅代理是独立的 Python 服务 `proxy-lite`，必须在统一 Agent 已接入后安装。它复用同一台服务器的专属 Agent Token，不使用管理员登录凭据。
+住宅代理服务 `proxy-lite` 已由 Full Deploy Command 自动安装。它复用同一台服务器的专属 Agent Token，不使用管理员登录凭据。
 
 ### 1. 配置 Pages 环境变量
 
@@ -282,11 +289,13 @@ PROXY_PASS=随机强密码
 
 如果要从其他设备访问 SOCKS5，请仅向可信客户端 IP 放行 `7920/TCP`。不要将代理端口无来源限制地暴露到公网。
 
-### 2. 获取服务器专属参数
+### 2. 一键部署
 
-在后台 **服务器与节点** 页面找到目标 VPS，复制该服务器当前部署命令中的 `--ip` 和 `--token`。Token 必须与该 IP 对应。
+在后台 **服务器与节点** 页面选择 Debian/Ubuntu 或 Alpine，复制该服务器卡片中的 **Full Deploy Command** 并执行。命令会同时安装统一 Agent 与住宅双隧道。
 
-### 3. 安装或升级住宅代理
+### 3. 仅重装住宅代理（可选）
+
+正常部署不需要执行以下命令。仅当统一 Agent 正常、但需要单独修复或重装住宅代理组件时使用：
 
 ```bash
 # Debian / Ubuntu
@@ -305,7 +314,7 @@ curl -fsSL --ipv4 https://您的域名/vps/residential-proxy.sh | bash -s -- \
   --token 服务器专属AgentToken
 ```
 
-脚本会：
+独立住宅修复脚本会：
 
 - 安装 OpenVPN、Python、iptables 和网络依赖
 - 在替换文件前停止旧 `proxy-lite`，避免 systemd 重启风暴
@@ -366,7 +375,7 @@ curl -fsS --max-time 30 \
 
 旧版部署曾将管理员密码哈希写入 `/opt/kui/config.json`。新版会在兼容窗口内恢复上报，并在成功拉取配置后自动将服务器专属 Token 原子写回本地。
 
-仍建议在 **2026-08-01 前**逐台重新执行面板当前生成的统一 Agent 部署命令，并重新执行住宅代理安装命令。全部迁移后设置：
+仍建议在 **2026-08-01 前**逐台重新执行面板当前生成的 Full Deploy Command。它会同时迁移统一 Agent 和住宅代理。全部迁移后设置：
 
 ```text
 LEGACY_AGENT_AUTH=false
@@ -489,6 +498,10 @@ A: 依次检查：
 **Q: 推送 GitHub 后 VPS 为什么没有更新？**
 
 A: 旧 Agent 没有热更新能力，必须执行一次新版部署命令完成引导。新版统一 Agent和住宅代理组件每小时自动更新。GitHub 推送还必须触发 Pages 生产分支部署；仅推送到未绑定的分支不会更新生产环境。
+
+**Q: 现在还需要单独运行住宅代理安装命令吗？**
+
+A: 不需要。服务器卡片的 Full Deploy Command 已自动执行住宅代理安装。独立 `residential-proxy.sh` 仅保留用于单独修复或重装住宅组件。
 
 **Q: Pages 已更新，但 `/vps/*.py` 看起来还是旧内容？**
 

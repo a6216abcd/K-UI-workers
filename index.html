@@ -502,7 +502,7 @@
                         <div class="p-4 md:p-6 bg-slate-100/50 border-t border-white flex flex-col gap-3">
                             <div class="bg-slate-800 p-4 rounded-[1.25rem] group shadow-inner transition-colors">
                                 <div class="text-[10px] text-slate-400 font-bold uppercase mb-2 flex justify-between items-center">
-                                    <span>Deploy Command</span>
+                                    <span>Full Deploy Command · KUI + 住宅双隧道</span>
                                     <div class="flex gap-2 text-[9px]">
                                         <label class="cursor-pointer hover:text-white flex items-center gap-1"><input type="radio" v-model="deployOsMap[vps.ip]" @change="saveOsMap" value="debian" class="accent-indigo-500"> Ubuntu/Debian</label>
                                         <label class="cursor-pointer hover:text-white flex items-center gap-1"><input type="radio" v-model="deployOsMap[vps.ip]" @change="saveOsMap" value="alpine" class="accent-indigo-500"> Alpine</label>
@@ -548,7 +548,7 @@
                             <h1 class="text-4xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400 tracking-tight drop-shadow-sm">Proxy Controller</h1>
                             <p class="text-slate-400 mt-2 text-sm flex items-center gap-2">
                                 <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
-                                直链提取 API: <a href="/api/proxy/proxies" target="_blank" class="text-indigo-400 hover:text-indigo-300 border-b border-indigo-400/30 hover:border-indigo-300 transition-colors">/api/proxies</a>
+                                鉴权提取 API: <a href="/api/proxy/proxies" target="_blank" class="text-indigo-400 hover:text-indigo-300 border-b border-indigo-400/30 hover:border-indigo-300 transition-colors">/api/proxy/proxies</a>
                             </p>
                         </div>
 
@@ -562,7 +562,7 @@
                                     </div>
                                     <span class="text-xs text-slate-400 font-mono ml-2">VPS 纳管命令 (Root)</span>
                                 </div>
-                                <div id="agent-cmd" class="p-3 bg-[#0D1117] text-sm pc-font-mono text-emerald-400 select-all overflow-x-auto whitespace-nowrap">请先在服务器列表创建 VPS，再复制其住宅代理部署命令</div>
+                                <div id="agent-cmd" class="p-3 bg-[#0D1117] text-sm pc-font-mono text-emerald-400 select-all overflow-x-auto whitespace-nowrap">住宅代理已合并到服务器 Full Deploy Command，无需二次安装。</div>
                             </div>
 
                             <div class="flex gap-4 text-xs font-mono">
@@ -1328,7 +1328,6 @@
                 
                 const saveOsMap = () => { localStorage.setItem('kui_deploy_os', JSON.stringify(deployOsMap)); };
                 const generateCmd = (ip) => { const osType = deployOsMap[ip] || 'debian'; const scriptUrl = currentDomain + "/vps/kui.sh"; const token = servers.value.find(s => s.ip === ip)?.agent_token || ''; if (!token) return '请先刷新页面以签发独立 Agent Token'; if (osType === 'alpine') return `apk update && apk add curl && curl -fsSL ${scriptUrl} | sh -s -- --api "${currentDomain}" --ip "${ip}" --token "${token}"`; else return `apt-get update -y && apt-get install -y curl && bash <(curl -fsSL ${scriptUrl}) --api "${currentDomain}" --ip "${ip}" --token "${token}"`; };
-                const generateResidentialCmd = (ip) => { const token = servers.value.find(s => s.ip === ip)?.agent_token || ''; return token ? `bash <(curl -fsSL ${currentDomain}/vps/residential-proxy.sh) --domain "${currentDomain}" --controller "${currentDomain}" --ip "${ip}" --token "${token}"` : '请先刷新页面以签发独立 Agent Token'; };
 
                 const saveSiteTitle = async () => { if(!siteTitleInput.value) return alert('名称不能为空！'); await fetchApi('/api/settings', { method: 'POST', body: JSON.stringify({ site_title: siteTitleInput.value }) }); siteTitle.value = siteTitleInput.value; alert('✅ KUI 聚合面板名称保存成功！'); };
                 const updateUserPassword = async () => { if(!userNewPassword.value) return alert('请输入新密码'); await fetchApi('/api/user/password', { method: 'PUT', body: JSON.stringify({ password: userNewPassword.value }) }); alert('✅ 密码修改成功！请使用新密码重新登录。'); logout(); };
@@ -1488,7 +1487,7 @@
                     isLoggedIn, showLoginModal, loginUser, password, currentUser, role, activeTab, 
                     servers, nodes, users, newVps, newNodeParams, newUser, 
                     login, logout, refreshData, addUser, toggleUser, deleteUser, resetUserTraffic, addVps, deleteVps, updateVpsSocks5, socks5Categories, socks5CatSelected, toggleSocks5Cat, addNode, deleteNode, toggleNode, resetTraffic, 
-                    getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateResidentialCmd, generateSubLink, copyCommand,
+                    getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateSubLink, copyCommand,
                     globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, saveSiteTitle, userNewPassword, updateUserPassword, resetMySubLink, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,
                     probeSys, publicProbeServers, filteredProbeServers, probeView, probeDetailId, probeDetail, setProbeView, openProbeDetail, probeGlobalOnline, probeGlobalOffline, probeGlobalSpeedIn, probeGlobalSpeedOut, probeGlobalNetRx, probeGlobalNetTx, filteredProbeGroups, probeCountryStats, currentFilter,
                     saveProbeSettings, adminProbeServers, probeEditModalOpen, editingProbeNode, openProbeEditModal, saveProbeEdit, deleteProbeNode, currentDomain,
@@ -1807,7 +1806,7 @@
             try {
                 const origin = window.location.origin;
                 const el = document.getElementById('agent-cmd');
-                if (el) el.textContent = '住宅代理必须使用服务器专属 Agent Token，请从服务器部署命令进入安装。';
+                if (el) el.textContent = '住宅代理已合并到服务器 Full Deploy Command，无需二次安装。';
             } catch (e) {}
 
             pcFetchCountries();

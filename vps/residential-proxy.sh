@@ -291,6 +291,14 @@ EOF
 }
 
 main() {
+    restore_core_services() {
+        if [ "$INIT_SYS" = "systemd" ]; then
+            systemctl start sing-box 2>/dev/null || true
+        elif [ "$INIT_SYS" = "openrc" ]; then
+            rc-service sing-box start 2>/dev/null || true
+        fi
+    }
+    trap restore_core_services EXIT INT TERM
     if [ "$INIT_SYS" = "systemd" ]; then
         systemctl stop proxy-lite 2>/dev/null || true
         systemctl disable proxy-lite 2>/dev/null || true
@@ -314,6 +322,13 @@ main() {
     elif [ "$INIT_SYS" = "openrc" ]; then
         rc-service kui-agent restart 2>/dev/null || true
     fi
+    for _ in $(seq 1 30); do
+        if [ "$INIT_SYS" = "systemd" ] && systemctl is-active --quiet sing-box; then break; fi
+        if [ "$INIT_SYS" = "openrc" ] && rc-service sing-box --quiet status; then break; fi
+        sleep 1
+    done
+    restore_core_services
+    trap - EXIT INT TERM
 
     echo ""
     echo "=========================================================="

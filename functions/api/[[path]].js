@@ -780,7 +780,7 @@ export async function onRequest(context) {
         if (!(await verifyAgent(request.headers.get('Authorization'), ip, db, env))) return new Response('Unauthorized', { status: 401 });
         if (!env.ASSETS) return Response.json({ error: 'ASSETS binding is unavailable' }, { status: 503 });
         const component = new URL(request.url).searchParams.get('component') || 'agent';
-        const assets = { agent: '/vps/agent.py', 'proxy-manager': '/vps/lite_manager.py', 'proxy-server': '/vps/proxy_server.py' };
+        const assets = { agent: '/vps/agent.py', 'proxy-manager': '/vps/lite_manager.py', 'proxy-server': '/vps/proxy_server.py', 'proxy-installer': '/vps/residential-proxy.sh' };
         if (!assets[component]) return Response.json({ error: 'Unknown agent component' }, { status: 400 });
         const assetUrl = new URL(assets[component], request.url);
         const asset = await env.ASSETS.fetch(assetUrl);
@@ -788,7 +788,8 @@ export async function onRequest(context) {
         const source = await asset.arrayBuffer();
         const digest = await crypto.subtle.digest('SHA-256', source);
         const sha256 = Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
-        return new Response(source, { headers: { 'Content-Type': 'text/x-python; charset=utf-8', 'Cache-Control': 'no-store', 'X-Agent-SHA256': sha256 } });
+        const contentType = component === 'proxy-installer' ? 'text/x-shellscript; charset=utf-8' : 'text/x-python; charset=utf-8';
+        return new Response(source, { headers: { 'Content-Type': contentType, 'Cache-Control': 'no-store', 'X-Agent-SHA256': sha256, 'X-Proxy-Controller-Mode': env.PROXY_CTRL_URL ? 'external' : 'builtin' } });
     }
 
     // 🌟 Agent 统一探针与管理上报接口 (融入全新的 Reset Day 计算和动态云端测速节点)
