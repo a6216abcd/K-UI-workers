@@ -8,7 +8,10 @@
     <meta http-equiv="Expires" content="0">
     <title>KUI x Server Monitor</title>
     
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/vue@3.5.17/dist/vue.global.prod.js"></script>
+    <script>
+        if (!window.Vue) document.write('<script src="https://cdn.jsdelivr.net/npm/vue@3.5.17/dist/vue.global.prod.js"><\/script>');
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
@@ -929,6 +932,12 @@
     </div>
 
     <script>
+        if (!window.Vue) {
+            const app = document.getElementById('app');
+            app.removeAttribute('v-cloak');
+            app.innerHTML = '<div style="max-width:680px;margin:15vh auto;padding:24px;font-family:system-ui;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:16px"><h2 style="margin-top:0">页面核心资源加载失败</h2><p>当前网络无法连接 Vue CDN。请刷新页面，或检查 unpkg.com 和 cdn.jsdelivr.net 是否被拦截。</p></div>';
+            throw new Error('Vue failed to load from both CDNs');
+        }
         const { createApp, ref, reactive, onMounted, onUnmounted, nextTick, computed, watch } = Vue;
         
         const sha256 = async (text) => { const buffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)); return Array.from(new Uint8Array(buffer)).map(b => b.toString(16).padStart(2, '0')).join(''); };
