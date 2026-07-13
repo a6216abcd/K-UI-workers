@@ -960,7 +960,7 @@
                 const realtimeUrl = ref('');
                 const realtimeConnected = ref(false);
                 let realtimeSocket = null; let realtimeReconnectTimer = null; let realtimeFallbackTimer = null; let realtimeConnectTimer = null; let realtimePingTimer = null; let realtimeGeneration = 0; let realtimeDisconnectedAt = 0; let lastRealtimePing = 0; let realtimeRetryDelay = 5000;
-                let publicRealtimeSocket = null; let publicRealtimeReconnectTimer = null; let publicRealtimeFallbackTimer = null; let publicRealtimeActivityTimer = null; let publicRealtimeDisconnectedAt = 0; let publicRealtimeRetryDelay = 10000;
+                let publicRealtimeSocket = null; let publicRealtimeReconnectTimer = null; let publicRealtimeFallbackTimer = null; let publicRealtimeConnectTimer = null; let publicRealtimeActivityTimer = null; let publicRealtimeDisconnectedAt = 0; let publicRealtimeRetryDelay = 10000;
                 const newVps = ref({ name: '', ip: '', os: 'debian' }); const newNodeParams = reactive({}); const newUser = reactive({ username: '', password: '', traffic_limit_gb: '', expire_date: '' });
                 const mySubToken = ref(''); const siteTitle = ref(''); const siteTitleInput = ref(''); const userNewPassword = ref('');
                 const batchStartPort = reactive({}); const batchUser = reactive({}); 
@@ -1125,6 +1125,7 @@
                     const signature = await generateHMAC(authKey.value, currentUser.value + timestamp);
                     return { 'Authorization': `${btoa(currentUser.value)}.${timestamp}.${signature}` };
                 };
+                window.kuiManagedServerIps = () => servers.value.map(server => server.ip).filter(Boolean);
 
                 const login = async () => {
                     if (!loginUser.value) loginUser.value = 'admin';
@@ -1214,16 +1215,25 @@
 
                 let isFirstLoad = true;
                 let isFetchingProbe = false;
+                let probeDetailRequestGeneration = 0;
                 const fetchProbeData = async (isDetail = false) => {
-                    if (isFetchingProbe) return; isFetchingProbe = true;
+                    const detailRequest = !!probeDetailId.value;
+                    if (!detailRequest && isFetchingProbe) return;
+                    if (!detailRequest) isFetchingProbe = true;
                     try {
                         let authHeader = {};
                         if (isLoggedIn.value) { const ts = Date.now().toString(); authHeader = {'Authorization': `${btoa(currentUser.value)}.${ts}.${await generateHMAC(authKey.value, currentUser.value + ts)}`}; }
                         
                         if (probeDetailId.value) {
-                            const res = await fetch(`/api/probe/detail?id=${probeDetailId.value}`, {headers: authHeader});
-                            if(!res.ok) { probeDetailId.value = null; throw new Error("Detail fetch failed"); }
-                            probeDetail.value = await res.json(); updateProbeDetailCharts(probeDetail.value);
+                            const requestedId = probeDetailId.value;
+                            const generation = ++probeDetailRequestGeneration;
+                            const res = await fetch(`/api/probe/detail?id=${encodeURIComponent(requestedId)}`, {headers: authHeader});
+                            if(!res.ok) { if (probeDetailId.value === requestedId && generation === probeDetailRequestGeneration) probeDetailId.value = null; throw new Error("Detail fetch failed"); }
+                            const detail = await res.json();
+                            if (probeDetailId.value !== requestedId || generation !== probeDetailRequestGeneration) return;
+                            const live = normalizeRealtimeKey(probeDetail.value?.id) === normalizeRealtimeKey(requestedId) ? probeDetail.value : null;
+                            probeDetail.value = live && Number(live._realtime_ts || 0) > Number(detail.last_updated || 0) ? { ...detail, ...live } : detail;
+                            updateProbeDetailCharts(probeDetail.value);
                         } else {
                             const ajaxParam = isFirstLoad ? '' : '?ajax=1';
                             isFirstLoad = false;
@@ -1232,7 +1242,11 @@
                             const data = await res.json(); 
                             Object.assign(probeSys, data.settings); 
                             if (data.settings.cached_nodes_data) parseCachedNodes(data.settings.cached_nodes_data);
-                            publicProbeServers.value = data.servers || [];
+                            const liveByIp = new Map(publicProbeServers.value.filter(item => item._realtime_ts).map(item => [normalizeRealtimeKey(item.id), item]));
+                            publicProbeServers.value = (data.servers || []).map(item => {
+                                const live = liveByIp.get(normalizeRealtimeKey(item.id));
+                                return live && live._realtime_ts > Number(item.last_updated || 0) ? { ...item, ...live } : item;
+                            });
                             if (data.realtime_url && data.realtime_url !== realtimeUrl.value) realtimeUrl.value = data.realtime_url;
                             if (!isLoggedIn.value && data.settings.is_public === 'true') queueMicrotask(connectPublicRealtime);
                             updateCustomStyles();
@@ -1246,7 +1260,7 @@
                                 if (!lastSeen || Date.now() - parseInt(lastSeen) > 86400000) showWelcomePopup.value = true;
                             }
                         }
-                    } catch(e) {} finally { isFetchingProbe = false; }
+                    } catch(e) {} finally { if (!detailRequest) isFetchingProbe = false; }
                 };
 
                 let isFetchingKUI = false;
@@ -1258,7 +1272,8 @@
                     }
                     try {
                         const res = await fetchApi('/api/data'); const data = await res.json();
-                        servers.value = data.servers || []; nodes.value = data.nodes || []; users.value = data.users || [];
+                        const liveByIp = new Map(servers.value.filter(item => item._realtime_ts).map(item => [normalizeRealtimeKey(item.ip), item]));
+                        servers.value = (data.servers || []).map(item => { const live = liveByIp.get(normalizeRealtimeKey(item.ip)); return live && live._realtime_ts > Number(item.last_report || 0) ? { ...item, ...live } : item; }); nodes.value = data.nodes || []; users.value = data.users || [];
                         for (const s of servers.value) {
                             if (socks5Snapshot[s.ip]) Object.assign(s, socks5Snapshot[s.ip]);
                         }
@@ -1480,18 +1495,24 @@
                 };
 
                 let dataTimer = null; let pingTimer = null; let probeTimer = null;
+                const normalizeRealtimeKey = value => String(value || '').trim().replace(/^\[|\]$/g, '').toLowerCase();
                 const applyRealtimeSnapshot = (snapshot) => {
-                    if (!snapshot || !snapshot.ip) return;
-                    const server = servers.value.find(item => item.ip === snapshot.ip);
-                    if (server && snapshot.core) {
+                    if (!snapshot?.ip) return;
+                    const key = normalizeRealtimeKey(snapshot.ip);
+                    if (snapshot.core) {
+                        const timestamp = Number(snapshot.core_last_seen || snapshot.updated_at || 0);
+                        const server = servers.value.find(item => normalizeRealtimeKey(item.ip) === key);
+                        if (server && timestamp >= Number(server._realtime_ts || server.last_report || 0)) {
+                            const core = snapshot.core;
+                            Object.assign(server, { cpu: core.cpu, mem: core.mem, disk: core.disk, load: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, last_report: timestamp, realtime_state: snapshot.core_state, boot_id: snapshot.boot_id?.core, sequence: snapshot.sequence?.core, config_result: snapshot.core_config_result, _realtime_ts: timestamp });
+                        }
                         const core = snapshot.core;
-                        Object.assign(server, { cpu: core.cpu, mem: core.mem, disk: core.disk, load: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, last_report: snapshot.core_last_seen || snapshot.updated_at, realtime_state: snapshot.core_state, boot_id: snapshot.boot_id?.core, sequence: snapshot.sequence?.core, config_result: snapshot.core_config_result });
-                        const probe = publicProbeServers.value.find(item => item.id === snapshot.ip);
-                        if (probe) Object.assign(probe, { cpu: core.cpu, ram: core.mem, disk: core.disk, load_avg: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, last_updated: snapshot.core_last_seen || snapshot.updated_at, realtime_state: snapshot.core_state });
-                        if (probeDetail.value?.id === snapshot.ip) Object.assign(probeDetail.value, { cpu: core.cpu, ram: core.mem, disk: core.disk, load_avg: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, last_updated: snapshot.core_last_seen || snapshot.updated_at, realtime_state: snapshot.core_state });
+                        const probe = publicProbeServers.value.find(item => normalizeRealtimeKey(item.id) === key);
+                        if (probe && timestamp >= Number(probe._realtime_ts || probe.last_updated || 0)) Object.assign(probe, { cpu: core.cpu, ram: core.mem, disk: core.disk, load_avg: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, last_updated: timestamp, realtime_state: snapshot.core_state, _realtime_ts: timestamp });
+                        if (normalizeRealtimeKey(probeDetail.value?.id) === key && timestamp >= Number(probeDetail.value?._realtime_ts || probeDetail.value?.last_updated || 0)) { Object.assign(probeDetail.value, { cpu: core.cpu, ram: core.mem, disk: core.disk, load_avg: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, last_updated: timestamp, realtime_state: snapshot.core_state, _realtime_ts: timestamp }); updateProbeDetailCharts(probeDetail.value); }
                     }
                     window.kuiRealtimeProxySnapshots = window.kuiRealtimeProxySnapshots || {};
-                    if (snapshot.proxy) { window.kuiRealtimeProxySnapshots[snapshot.ip] = snapshot; if (activeTab.value === 'proxy') setTimeout(pcFetchNodes, 0); }
+                    if (snapshot.proxy || snapshot.proxy_state || snapshot.proxy_config_result) { const previous = window.kuiRealtimeProxySnapshots[snapshot.ip] || {}; window.kuiRealtimeProxySnapshots[snapshot.ip] = { ...previous, ...snapshot, proxy: snapshot.proxy || previous.proxy }; if (activeTab.value === 'proxy') setTimeout(pcFetchNodes, 0); }
                 };
                 const scheduleRealtimeFallback = () => {
                     clearTimeout(realtimeFallbackTimer);
@@ -1528,9 +1549,11 @@
                     if (publicRealtimeSocket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(publicRealtimeSocket.readyState)) return;
                     const socket = new WebSocket(realtimeUrl.value.replace(/^http/, 'ws') + '/public/ws');
                     publicRealtimeSocket = socket;
-                    socket.onopen = () => { if (publicRealtimeSocket !== socket) return socket.close(); publicRealtimeDisconnectedAt = 0; publicRealtimeRetryDelay = 10000; clearTimeout(publicRealtimeFallbackTimer); stopProbePolling(); clearInterval(publicRealtimeActivityTimer); };
+                    clearTimeout(publicRealtimeConnectTimer);
+                    publicRealtimeConnectTimer = setTimeout(() => { if (publicRealtimeSocket === socket && socket.readyState === WebSocket.CONNECTING) socket.close(); }, 30000);
+                    socket.onopen = () => { if (publicRealtimeSocket !== socket) return socket.close(); clearTimeout(publicRealtimeConnectTimer); publicRealtimeDisconnectedAt = 0; publicRealtimeRetryDelay = 10000; clearTimeout(publicRealtimeFallbackTimer); stopProbePolling(); clearInterval(publicRealtimeActivityTimer); };
                     socket.onmessage = event => { if (publicRealtimeSocket !== socket) return; try { const message = JSON.parse(event.data); if (message.type === 'snapshot') (message.data || []).forEach(applyRealtimeSnapshot); else if (message.type === 'patch') applyRealtimeSnapshot(message.data); } catch(e) {} };
-                    socket.onclose = event => { if (publicRealtimeSocket !== socket) return; publicRealtimeSocket = null; clearInterval(publicRealtimeActivityTimer); if (event.code === 1008) { clearTimeout(publicRealtimeReconnectTimer); startProbePolling(); return; } if (!publicRealtimeDisconnectedAt) publicRealtimeDisconnectedAt = Date.now(); clearTimeout(publicRealtimeFallbackTimer); publicRealtimeFallbackTimer = setTimeout(() => { if (!document.hidden && !isLoggedIn.value) startProbePolling(); }, Math.max(0, 30000 - (Date.now() - publicRealtimeDisconnectedAt))); clearTimeout(publicRealtimeReconnectTimer); const delay = publicRealtimeRetryDelay; publicRealtimeRetryDelay = Math.min(publicRealtimeRetryDelay * 2, 60000); publicRealtimeReconnectTimer = setTimeout(connectPublicRealtime, delay); };
+                    socket.onclose = event => { if (publicRealtimeSocket !== socket) return; clearTimeout(publicRealtimeConnectTimer); publicRealtimeSocket = null; clearInterval(publicRealtimeActivityTimer); if (event.code === 1008) { clearTimeout(publicRealtimeReconnectTimer); startProbePolling(); return; } if (!publicRealtimeDisconnectedAt) publicRealtimeDisconnectedAt = Date.now(); clearTimeout(publicRealtimeFallbackTimer); publicRealtimeFallbackTimer = setTimeout(() => { if (!document.hidden && !isLoggedIn.value) startProbePolling(); }, Math.max(0, 30000 - (Date.now() - publicRealtimeDisconnectedAt))); clearTimeout(publicRealtimeReconnectTimer); const delay = publicRealtimeRetryDelay; publicRealtimeRetryDelay = Math.min(publicRealtimeRetryDelay * 2, 60000); publicRealtimeReconnectTimer = setTimeout(connectPublicRealtime, delay); };
                     socket.onerror = () => socket.close();
                 };
                 const notifyRealtime = async (ip = '') => { if (!realtimeUrl.value || role.value !== 'admin') return; try { const headers = await window.kuiAdminAuthHeader(); await fetch(`${realtimeUrl.value}/notify`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(ip ? { ip } : {}) }); } catch(e) {} };
@@ -1630,13 +1653,15 @@
             const port = parseInt(document.getElementById(`slot-port`).value) || 7920;
             try {
                 const auth = await getPcAuthHeader();
-                const res = await fetch('/api/proxy/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': auth },
-                    body: JSON.stringify({ "0": val, "country": val, "port": port })
-                });
-                const text = await res.text();
-                if (!res.ok) throw new Error(text || res.status);
+                const targets = window.kuiManagedServerIps?.() || [];
+                if (!targets.length) throw new Error('暂无已接入 VPS');
+                let text = '';
+                for (const ip of targets) {
+                    const res = await fetch('/api/proxy/config', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': auth }, body: JSON.stringify({ ip, "0": val, "country": val, "port": port }) });
+                    text = await res.text();
+                    if (!res.ok) throw new Error(text || res.status);
+                    window.kuiNotifyRealtime?.(ip);
+                }
                 // 直接从 POST 响应体更新输入字段，避免立即回读时 D1 最终一致性导致读到旧数据
                 try {
                     const resp = JSON.parse(text);
@@ -1646,8 +1671,7 @@
                     if (cfg0) cfg0.value = String(saved["0"] || saved.country || val).toUpperCase();
                     if (portEl) portEl.value = saved.port || port;
                 } catch(e) { console.warn('[pc] parse response failed', e); }
-                alert('🚀 策略及端口已云端同步！Agent 将在下一心跳周期应用。');
-                window.kuiNotifyRealtime?.();
+                alert(`🚀 策略及端口已实时下发到 ${targets.length} 台 VPS！`);
             } catch (e) { alert('❌ 下发失败: ' + e.message); }
         }
 
@@ -1656,14 +1680,15 @@
             const port = parseInt(document.getElementById(`slot-port`).value) || 7920;
             try {
                 const auth = await getPcAuthHeader();
-                const res = await fetch('/api/proxy/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': auth },
-                    body: JSON.stringify({ "0": val, "country": val, "port": port, "switch_trigger": Date.now() })
-                });
-                if (!res.ok) { const err = await res.text(); throw new Error(err || res.status); }
-                window.kuiNotifyRealtime?.();
-                alert('🔄 重拨指令已下发！VPS 将清退当前通道池重新并发建连...');
+                const targets = window.kuiManagedServerIps?.() || [];
+                if (!targets.length) throw new Error('暂无已接入 VPS');
+                const trigger = Date.now();
+                for (const ip of targets) {
+                    const res = await fetch('/api/proxy/config', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': auth }, body: JSON.stringify({ ip, "0": val, "country": val, "port": port, "switch_trigger": trigger }) });
+                    if (!res.ok) { const err = await res.text(); throw new Error(err || res.status); }
+                    window.kuiNotifyRealtime?.(ip);
+                }
+                alert(`🔄 重拨指令已实时下发到 ${targets.length} 台 VPS！`);
             } catch (e) { alert('❌ 下发失败: ' + e.message); }
         }
 
@@ -1764,7 +1789,7 @@
                 servers = pcHttpServers.slice();
                 if (realtimeSnapshots.length) {
                     const byIp = new Map(servers.map(server => [server.ip, server]));
-                    realtimeSnapshots.forEach(snapshot => byIp.set(snapshot.ip, { ...(byIp.get(snapshot.ip) || {}), ip: snapshot.ip, details: JSON.stringify(snapshot.proxy?.details || []), last_seen: snapshot.proxy_last_seen || snapshot.updated_at, logs: snapshot.proxy?.logs || '' }));
+                    realtimeSnapshots.forEach(snapshot => { const previous = byIp.get(snapshot.ip) || {}; byIp.set(snapshot.ip, { ...previous, ip: snapshot.ip, details: snapshot.proxy?.details ? JSON.stringify(snapshot.proxy.details) : (previous.details || '[]'), last_seen: snapshot.proxy_last_seen || snapshot.updated_at || previous.last_seen, logs: snapshot.proxy?.logs ?? previous.logs ?? '' }); });
                     servers = Array.from(byIp.values());
                 }
                 const tbody = document.getElementById('pc-nodes-table');
