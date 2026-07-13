@@ -248,7 +248,7 @@ def _verify_warp_exit(mode):
     for family, url in checks:
         verified = False
         for _ in range(4):
-            result = subprocess.run(["curl", "-fsS", "--connect-timeout", "5", "--max-time", "12", "--proxy", "socks5://127.0.0.1:39482", url], capture_output=True, text=True)
+            result = subprocess.run(["curl", "-fsSL", "--connect-timeout", "5", "--max-time", "12", "--proxy", "socks5://127.0.0.1:39482", url], capture_output=True, text=True)
             if result.returncode == 0 and "warp=on" in result.stdout.lower():
                 verified = True; break
             time.sleep(2)
@@ -257,7 +257,7 @@ def _verify_warp_exit(mode):
 
 def _verify_residential_exit():
     for _ in range(4):
-        result = subprocess.run(["curl", "-fsS", "--connect-timeout", "5", "--max-time", "15", "--proxy", "socks5://127.0.0.1:39482", "http://1.1.1.1/cdn-cgi/trace"], capture_output=True, text=True)
+        result = subprocess.run(["curl", "-fsSL", "--connect-timeout", "5", "--max-time", "15", "--proxy", "socks5://127.0.0.1:39482", "http://1.1.1.1/cdn-cgi/trace"], capture_output=True, text=True)
         trace = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
         if result.returncode == 0 and trace.get("ip") and trace.get("ip") != VPS_IP and trace.get("warp", "off").lower() != "on": return True
         time.sleep(2)
