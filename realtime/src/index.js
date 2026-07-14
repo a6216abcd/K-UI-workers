@@ -1,8 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 
-// Viewers receive five-second updates. Connected agents slow routine status
-// snapshots only while no dashboard or public probe WebSocket is open.
-const ACTIVE_STATUS_INTERVAL = 5_000;
+// Admins need the fastest updates. Public monitoring remains responsive at
+// ten seconds, while no viewers reduces routine status work to thirty seconds.
+const ADMIN_STATUS_INTERVAL = 5_000;
+const PUBLIC_STATUS_INTERVAL = 10_000;
 const IDLE_STATUS_INTERVAL = 30_000;
 const STATUS_STALE_AFTER = 20_000;
 const VIEWER_LEASE_MS = 90_000;
@@ -160,6 +161,7 @@ export class VpsPresence extends DurableObject {
     this.env = env;
     this.snapshot = { ip: "", core: null, proxy: null, updated_at: 0 };
     this.dashboardActive = false;
+    this.dashboardInterval = IDLE_STATUS_INTERVAL;
     this.dashboardActiveUntil = 0;
     this.lastPersisted = 0;
     this.lastStatusBroadcast = 0;
@@ -191,14 +193,14 @@ export class VpsPresence extends DurableObject {
       try {
         const activeResponse = await hub.fetch(new Request("https://hub.internal/active"));
         const active = activeResponse.ok ? await activeResponse.json() : null;
-        this.setDashboardActivity(active?.active === true, Number(active?.until) || Date.now() + 300000);
+        this.setDashboardActivity(active?.active === true, Number(active?.interval_seconds) * 1000 || IDLE_STATUS_INTERVAL, Number(active?.until) || Date.now() + 300000);
       } catch {}
       this.snapshot.ip = ip;
       this.snapshot[`${role}_connected`] = true;
       this.snapshot[`${role}_connected_at`] = Date.now();
       await this.broadcast();
       server.send(JSON.stringify({ type: "hello.ok", ts: Date.now(), role }));
-      server.send(JSON.stringify({ type: "status.interval", seconds: this.dashboardActive ? 5 : 30 }));
+      server.send(JSON.stringify({ type: "status.interval", seconds: this.dashboardInterval / 1000 }));
       return new Response(null, { status: 101, webSocket: client });
     }
     if (url.pathname === "/notify") {
@@ -208,7 +210,7 @@ export class VpsPresence extends DurableObject {
       return json({ success: true });
     }
     if (url.pathname === "/dashboard-active" && request.method === "POST") {
-      this.setDashboardActivity(request.headers.get("X-KUI-Active") === "1", Number(request.headers.get("X-KUI-Until")) || Date.now() + 300000);
+      this.setDashboardActivity(request.headers.get("X-KUI-Active") === "1", Number(request.headers.get("X-KUI-Interval")) || IDLE_STATUS_INTERVAL, Number(request.headers.get("X-KUI-Until")) || Date.now() + 300000);
       return json({ success: true });
     }
     if (url.pathname === "/snapshot") return json(this.publicSnapshot());
@@ -266,7 +268,7 @@ export class VpsPresence extends DurableObject {
       await this.ctx.storage.put("state", { snapshot: this.snapshot, lastSeq: this.lastSeq, bootId: this.bootId, persistedAt: this.lastPersisted });
     }
     if (Date.now() >= this.dashboardActiveUntil) await this.refreshDashboardActivity();
-    const statusBroadcastDue = this.dashboardActive && Date.now() - this.lastStatusBroadcast >= ACTIVE_STATUS_INTERVAL;
+    const statusBroadcastDue = this.dashboardActive && Date.now() - this.lastStatusBroadcast >= this.dashboardInterval;
     if (statusBroadcastDue) this.lastStatusBroadcast = Date.now();
     if (statusBroadcastDue || criticalChange) await this.broadcast();
   }
@@ -288,13 +290,13 @@ export class VpsPresence extends DurableObject {
     }
   }
 
-  setDashboardActivity(active, until) {
-    const changed = this.dashboardActive !== active;
+  setDashboardActivity(active, interval, until) {
+    const changed = this.dashboardActive !== active || this.dashboardInterval !== interval;
     this.dashboardActive = active;
+    this.dashboardInterval = interval;
     this.dashboardActiveUntil = until;
     if (!changed) return;
     this.lastStatusBroadcast = 0;
-    const interval = active ? ACTIVE_STATUS_INTERVAL : IDLE_STATUS_INTERVAL;
     for (const ws of this.ctx.getWebSockets()) {
       try { ws.send(JSON.stringify({ type: "status.interval", seconds: interval / 1000 })); } catch {}
     }
@@ -305,9 +307,9 @@ export class VpsPresence extends DurableObject {
     try {
       const response = await hub.fetch(new Request("https://hub.internal/active"));
       const active = response.ok ? await response.json() : null;
-      this.setDashboardActivity(active?.active === true, Number(active?.until) || Date.now() + IDLE_STATUS_INTERVAL);
+      this.setDashboardActivity(active?.active === true, Number(active?.interval_seconds) * 1000 || IDLE_STATUS_INTERVAL, Number(active?.until) || Date.now() + IDLE_STATUS_INTERVAL);
     } catch {
-      this.setDashboardActivity(false, Date.now() + IDLE_STATUS_INTERVAL);
+      this.setDashboardActivity(false, IDLE_STATUS_INTERVAL, Date.now() + IDLE_STATUS_INTERVAL);
     }
   }
 
@@ -368,6 +370,7 @@ export class DashboardHub extends DurableObject {
     this.env = env;
     try { ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong")); } catch {}
     this.activityUntil = 0;
+    this.activityInterval = IDLE_STATUS_INTERVAL;
     this.publicPolicyAllowed = false;
     this.publicPolicyCheckedAt = 0;
     this.snapshotCache = null;
@@ -383,8 +386,9 @@ export class DashboardHub extends DurableObject {
       return json({ ticket, expires_in: 60 });
     }
     if (url.pathname === "/active") {
-      const active = this.ctx.getWebSockets("dashboard").length + this.ctx.getWebSockets("public").length > 0;
-      return json({ active, until: active ? Date.now() + VIEWER_LEASE_MS : 0 });
+      const interval = this.viewerInterval();
+      const active = interval < IDLE_STATUS_INTERVAL;
+      return json({ active, interval_seconds: interval / 1000, until: active ? Date.now() + VIEWER_LEASE_MS : 0 });
     }
     if (url.pathname === "/ws") {
       const ticket = url.searchParams.get("ticket") || "";
@@ -399,7 +403,7 @@ export class DashboardHub extends DurableObject {
       if (this.ctx.getWebSockets("dashboard").length >= MAX_DASHBOARD_SOCKETS) return json({ error: "Too many dashboard connections" }, 429);
       server.serializeAttachment({ user: record.user, connected_at: Date.now(), lastActivity: Date.now(), lastResync: 0 });
       this.ctx.acceptWebSocket(server, ["dashboard"]);
-      await this.setDashboardActivity(true);
+      await this.setDashboardActivity();
       await this.ctx.storage.setAlarm(Date.now() + 30000);
       server.send(JSON.stringify({ type: "snapshot", data: await this.snapshot(), ts: Date.now() }));
       return new Response(null, { status: 101, webSocket: client });
@@ -412,7 +416,7 @@ export class DashboardHub extends DurableObject {
       const [client, server] = Object.values(pair);
       server.serializeAttachment({ public: true, clientIp, connected_at: Date.now(), lastActivity: Date.now(), lastResync: 0 });
       this.ctx.acceptWebSocket(server, ["public"]);
-      await this.setDashboardActivity(true);
+      await this.setDashboardActivity();
       await this.ctx.storage.setAlarm(Date.now() + 60000);
       server.send(JSON.stringify({ type: "snapshot", data: (await this.snapshot()).map(sanitizeSnapshot).filter(Boolean), ts: Date.now() }));
       return new Response(null, { status: 101, webSocket: client });
@@ -504,26 +508,35 @@ export class DashboardHub extends DurableObject {
             return;
           }
         }
-        await this.setDashboardActivity(true);
+        await this.setDashboardActivity();
       }
     } catch {}
   }
 
   async webSocketClose() {
-    if (this.ctx.getWebSockets("dashboard").length + this.ctx.getWebSockets("public").length === 0) await this.setDashboardActivity(false);
+    await this.setDashboardActivity();
   }
   async webSocketError() {
-    if (this.ctx.getWebSockets("dashboard").length + this.ctx.getWebSockets("public").length === 0) await this.setDashboardActivity(false);
+    await this.setDashboardActivity();
   }
 
-  async setDashboardActivity(active) {
+  viewerInterval() {
+    if (this.ctx.getWebSockets("dashboard").length) return ADMIN_STATUS_INTERVAL;
+    if (this.ctx.getWebSockets("public").length) return PUBLIC_STATUS_INTERVAL;
+    return IDLE_STATUS_INTERVAL;
+  }
+
+  async setDashboardActivity() {
+    const interval = this.viewerInterval();
+    const active = interval < IDLE_STATUS_INTERVAL;
     const until = active ? Date.now() + VIEWER_LEASE_MS : 0;
-    if (active && this.activityUntil - Date.now() > 60000) return;
+    if (this.activityInterval === interval && (!active || this.activityUntil - Date.now() > 60000)) return;
     this.activityUntil = until;
+    this.activityInterval = interval;
     const servers = (await this.env.DB.prepare("SELECT ip FROM servers").all()).results || [];
     await Promise.all(servers.slice(0, 100).map(({ ip }) => {
       const presence = this.env.VPS_PRESENCE.get(this.env.VPS_PRESENCE.idFromName(ip));
-      return presence.fetch(new Request("https://presence.internal/dashboard-active", { method: "POST", headers: { "X-KUI-Active": active ? "1" : "0", "X-KUI-Until": String(until) } }));
+      return presence.fetch(new Request("https://presence.internal/dashboard-active", { method: "POST", headers: { "X-KUI-Active": active ? "1" : "0", "X-KUI-Interval": String(interval), "X-KUI-Until": String(until) } }));
     }));
   }
 
@@ -548,8 +561,8 @@ export class DashboardHub extends DurableObject {
       else if (!next || value.expires < next) next = value.expires;
     }
     if (expired.length) await this.ctx.storage.delete(expired);
-    const hasActiveViewers = this.ctx.getWebSockets("dashboard").length + this.ctx.getWebSockets("public").length > 0;
-    if (!hasActiveViewers) await this.setDashboardActivity(false);
+    const hasActiveViewers = this.viewerInterval() < IDLE_STATUS_INTERVAL;
+    if (!hasActiveViewers) await this.setDashboardActivity();
     const publicSockets = this.ctx.getWebSockets("public");
     if (publicSockets.length) {
       const setting = await this.env.DB.prepare("SELECT value FROM probe_settings WHERE key = 'is_public'").first();

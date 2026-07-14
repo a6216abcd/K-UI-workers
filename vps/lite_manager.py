@@ -335,7 +335,7 @@ def on_realtime_message(message):
     global realtime_status_interval
     if message.get("type") == "status.interval":
         requested_interval = int(message.get("seconds", REALTIME_STATUS_IDLE_INTERVAL))
-        realtime_status_interval = REALTIME_STATUS_ACTIVE_INTERVAL if requested_interval <= REALTIME_STATUS_ACTIVE_INTERVAL else REALTIME_STATUS_IDLE_INTERVAL
+        realtime_status_interval = max(REALTIME_STATUS_ACTIVE_INTERVAL, min(REALTIME_STATUS_IDLE_INTERVAL, requested_interval))
         heartbeat_wakeup.set()
     if message.get("type") in {"config.refresh", "transport.connected", "transport.disconnected"}: config_wakeup.set()
     if message.get("type") in {"transport.connected", "transport.disconnected"}: heartbeat_wakeup.set()
