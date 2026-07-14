@@ -1217,7 +1217,7 @@ export async function onRequest(context) {
                     } else if (node.protocol === "gRPC-Reality") {
                         cProxy += `\n    tls: true\n    servername: ${yamlString(nodeSni)}\n    client-fingerprint: chrome\n    network: grpc\n    grpc-opts:\n      grpc-service-name: grpc\n    reality-opts:\n      public-key: ${yamlString(node.public_key)}\n      short-id: ${yamlString(node.short_id || "")}`;
                     } else if (node.protocol === "H2-Reality") {
-                        cProxy += `\n    tls: true\n    servername: ${yamlString(nodeSni)}\n    client-fingerprint: chrome\n    network: h2\n    h2-opts:\n      host:\n        - ${yamlString(nodeSni || nodeIp)}\n      path: "/"`;
+                        cProxy += `\n    tls: true\n    servername: ${yamlString(nodeSni)}\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: ${yamlString(node.public_key || '')}\n      short-id: ${yamlString(node.short_id || "")}\n    network: h2\n    h2-opts:\n      host:\n        - ${yamlString(nodeSni || nodeIp)}\n      path: "/"`;
                     } else if (node.protocol === 'VLESS-Argo' && !(node.sni || '').includes('等待')) {
                         cProxy += `\n    tls: true\n    servername: ${yamlString(nodeSni)}\n    network: ws\n    ws-opts:\n      path: "/"\n      headers:\n        Host: ${yamlString(nodeSni)}`;
                     }
