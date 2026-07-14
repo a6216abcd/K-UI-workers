@@ -1,5 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 
+// Viewers receive five-second updates. Connected agents slow routine status
+// snapshots only while no dashboard or public probe WebSocket is open.
+const ACTIVE_STATUS_INTERVAL = 5_000;
+const IDLE_STATUS_INTERVAL = 30_000;
+const STATUS_STALE_AFTER = 20_000;
+
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
@@ -148,6 +154,7 @@ export class VpsPresence extends DurableObject {
     this.dashboardActive = false;
     this.dashboardActiveUntil = 0;
     this.lastPersisted = 0;
+    this.lastStatusBroadcast = 0;
     try { ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong")); } catch {}
     this.lastSeq = { core: -1, proxy: -1 };
     this.bootId = { core: "", proxy: "" };
@@ -176,14 +183,14 @@ export class VpsPresence extends DurableObject {
       try {
         const activeResponse = await hub.fetch(new Request("https://hub.internal/active"));
         const active = activeResponse.ok ? await activeResponse.json() : null;
-        this.dashboardActive = active?.active === true;
-        this.dashboardActiveUntil = Number(active?.until) || Date.now() + 300000;
+        this.setDashboardActivity(active?.active === true, Number(active?.until) || Date.now() + 300000);
       } catch {}
       this.snapshot.ip = ip;
       this.snapshot[`${role}_connected`] = true;
       this.snapshot[`${role}_connected_at`] = Date.now();
       await this.broadcast();
       server.send(JSON.stringify({ type: "hello.ok", ts: Date.now(), role }));
+      server.send(JSON.stringify({ type: "status.interval", seconds: this.dashboardActive ? 5 : 30 }));
       return new Response(null, { status: 101, webSocket: client });
     }
     if (url.pathname === "/notify") {
@@ -193,8 +200,7 @@ export class VpsPresence extends DurableObject {
       return json({ success: true });
     }
     if (url.pathname === "/dashboard-active" && request.method === "POST") {
-      this.dashboardActive = request.headers.get("X-KUI-Active") === "1";
-      this.dashboardActiveUntil = Number(request.headers.get("X-KUI-Until")) || Date.now() + 300000;
+      this.setDashboardActivity(request.headers.get("X-KUI-Active") === "1", Number(request.headers.get("X-KUI-Until")) || Date.now() + 300000);
       return json({ success: true });
     }
     if (url.pathname === "/snapshot") return json(this.publicSnapshot());
@@ -249,7 +255,9 @@ export class VpsPresence extends DurableObject {
       this.lastPersisted = Date.now();
       await this.ctx.storage.put("state", { snapshot: this.snapshot, lastSeq: this.lastSeq, bootId: this.bootId, persistedAt: this.lastPersisted });
     }
-    if (role === "core" || criticalChange) await this.broadcast();
+    const statusBroadcastDue = this.dashboardActive && role === "core" && Date.now() - this.lastStatusBroadcast >= ACTIVE_STATUS_INTERVAL;
+    if (statusBroadcastDue) this.lastStatusBroadcast = Date.now();
+    if (statusBroadcastDue || criticalChange) await this.broadcast();
   }
 
   async webSocketClose(ws) {
@@ -269,6 +277,18 @@ export class VpsPresence extends DurableObject {
     }
   }
 
+  setDashboardActivity(active, until) {
+    const changed = this.dashboardActive !== active;
+    this.dashboardActive = active;
+    this.dashboardActiveUntil = until;
+    if (!changed) return;
+    this.lastStatusBroadcast = 0;
+    const interval = active ? ACTIVE_STATUS_INTERVAL : IDLE_STATUS_INTERVAL;
+    for (const ws of this.ctx.getWebSockets()) {
+      try { ws.send(JSON.stringify({ type: "status.interval", seconds: interval / 1000 })); } catch {}
+    }
+  }
+
   publicSnapshot() {
     this.syncFromSockets();
     const now = Date.now();
@@ -276,8 +296,8 @@ export class VpsPresence extends DurableObject {
     const proxyAge = this.snapshot.proxy_last_seen ? now - this.snapshot.proxy_last_seen : null;
     return {
       ...this.snapshot,
-      core_state: !this.snapshot.core_connected ? "offline" : coreAge === null || coreAge > 20000 ? "stale" : "online",
-      proxy_state: !this.snapshot.proxy_connected ? "offline" : proxyAge === null || proxyAge > 20000 ? "stale" : "online",
+      core_state: !this.snapshot.core_connected ? "offline" : coreAge === null || coreAge > STATUS_STALE_AFTER ? "stale" : "online",
+      proxy_state: !this.snapshot.proxy_connected ? "offline" : proxyAge === null || proxyAge > STATUS_STALE_AFTER ? "stale" : "online",
       core_age: coreAge,
       proxy_age: proxyAge,
       boot_id: this.bootId,
@@ -313,8 +333,7 @@ export class VpsPresence extends DurableObject {
       try {
         const response = await hub.fetch(new Request("https://hub.internal/active"));
         const active = response.ok ? await response.json() : null;
-        this.dashboardActive = active?.active === true;
-        this.dashboardActiveUntil = Number(active?.until) || Date.now() + 300000;
+        this.setDashboardActivity(active?.active === true, Number(active?.until) || Date.now() + 300000);
       } catch {
         this.dashboardActive = false;
         this.dashboardActiveUntil = Date.now() + 300000;

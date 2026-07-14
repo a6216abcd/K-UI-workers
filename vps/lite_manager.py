@@ -53,6 +53,9 @@ config_wakeup = threading.Event()
 heartbeat_wakeup = threading.Event()
 last_http_report = 0
 REALTIME_HTTP_INTERVAL = 900
+REALTIME_STATUS_ACTIVE_INTERVAL = 5
+REALTIME_STATUS_IDLE_INTERVAL = 30
+realtime_status_interval = REALTIME_STATUS_IDLE_INTERVAL
 
 state_lock = threading.Lock()
 dead_ips = set()
@@ -309,7 +312,7 @@ def c2_heartbeat_loop():
         except Exception as error:
             print(f"[c2] 状态上报失败: {error}", flush=True)
         if realtime_channel and realtime_channel.connected:
-            interval = 5
+            interval = realtime_status_interval
         elif realtime_channel and realtime_channel.enabled and not realtime_channel.ever_connected and time.time() - realtime_channel.started_at < 30:
             interval = max(1, 30 - (time.time() - realtime_channel.started_at))
         elif realtime_channel and realtime_channel.ever_connected and time.time() - realtime_channel.last_disconnected < 30:
@@ -320,6 +323,11 @@ def c2_heartbeat_loop():
         heartbeat_wakeup.clear()
 
 def on_realtime_message(message):
+    global realtime_status_interval
+    if message.get("type") == "status.interval":
+        requested_interval = int(message.get("seconds", REALTIME_STATUS_IDLE_INTERVAL))
+        realtime_status_interval = REALTIME_STATUS_ACTIVE_INTERVAL if requested_interval <= REALTIME_STATUS_ACTIVE_INTERVAL else REALTIME_STATUS_IDLE_INTERVAL
+        heartbeat_wakeup.set()
     if message.get("type") in {"config.refresh", "transport.connected", "transport.disconnected"}: config_wakeup.set()
     if message.get("type") in {"transport.connected", "transport.disconnected"}: heartbeat_wakeup.set()
 
