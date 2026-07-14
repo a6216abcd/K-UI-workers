@@ -372,6 +372,7 @@
                         <button @click="activeTab = 'nodes'" :class="activeTab === 'nodes' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">服务器与节点</button>
                         <button @click="activeTab = 'users'" :class="activeTab === 'users' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">多用户管理</button>
                         <button @click="activeTab = 'proxy'" :class="activeTab === 'proxy' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">🌐 住宅IP代理</button>
+                        <button @click="activeTab = 'realm'" :class="activeTab === 'realm' ? 'bg-white text-cyan-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">🔀 Realm中转</button>
                         <button @click="activeTab = 'thirdparty'" :class="activeTab === 'thirdparty' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">🔗 第三方订阅</button>
                         <button @click="activeTab = 'settings'" :class="activeTab === 'settings' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base">⚙️ 系统设置</button>
                         <button @click="activeTab = 'probe'; probeDetailId = null;" class="px-6 md:px-8 py-2.5 rounded-full font-bold transition-all text-sm md:text-base text-emerald-600 hover:bg-emerald-50 shadow-sm border border-transparent hover:border-emerald-200">🌐 探针全景大盘</button>
@@ -558,6 +559,14 @@
             </div>
 
             <!-- 住宅IP代理控制器 (双活引擎总控 - 已内联) -->
+            <div v-if="isLoggedIn && role === 'admin' && activeTab === 'realm'" class="min-h-[420px] flex items-center justify-center px-4">
+                <div class="w-full max-w-xl bg-white/70 backdrop-blur-xl rounded-[2rem] border border-white shadow-xl shadow-cyan-100/40 p-10 text-center">
+                    <div class="w-16 h-16 mx-auto mb-5 rounded-2xl bg-cyan-50 text-cyan-600 flex items-center justify-center text-3xl">🔀</div>
+                    <h3 class="text-2xl font-black text-slate-800">Realm 中转</h3>
+                    <p class="mt-3 text-slate-500 font-medium">未来规划，敬请期待</p>
+                </div>
+            </div>
+
             <div v-if="isLoggedIn && role === 'admin' && activeTab === 'proxy'" class="pc-body min-h-screen bg-[#090E17] text-slate-300 relative overflow-x-hidden selection:bg-indigo-500/30">
                 <div class="fixed top-[-20%] left-[-10%] w-[50%] h-[50%] bg-indigo-600/20 blur-[120px] rounded-full pointer-events-none z-0"></div>
                 <div class="fixed bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-blue-600/10 blur-[120px] rounded-full pointer-events-none z-0"></div>
