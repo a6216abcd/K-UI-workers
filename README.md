@@ -1,5 +1,32 @@
 # KUI x Server Monitor Pro
 
+## 项目赞助商
+
+<p align="center">
+  <a href="https://derouter.ai?ref=0oZZ1HVc" target="_blank">
+    <strong>DeRouter</strong> - 基于区块链的透明大模型 API 网关
+  </a>
+</p>
+
+DeRouter 提供 Claude、GPT 等模型 API 服务，支持透明可验证的模型调用。
+
+- 官网：https://derouter.ai?ref=0oZZ1HVc
+- X：https://x.com/derouter_net
+- 有 API 需求或 Claude 账号托管需求可访问其官网了解详情。
+
+<p align="center">
+  <a href="https://bytevirt.com/aff.php?aff=209" target="_blank">
+    <strong>ByteVirt</strong> - 高性价比云服务器与 VPS 服务商
+  </a>
+</p>
+
+ByteVirt 提供多地域 VPS，适合部署 KUI VPS Agent、探针与代理节点。
+
+- 官网：https://bytevirt.com/aff.php?aff=209
+- 多地域机房与稳定网络，适用于 KUI 节点部署。
+
+---
+
 KUI 是一个部署在 **单一 Cloudflare Worker** 的代理节点管理与服务器探针面板。Worker Assets 托管前端和 VPS 安装组件，D1 保存配置、用户、流量和探针数据，Durable Objects 提供实时 WebSocket；无需部署传统面板服务器或额外 Realtime Worker。
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/a6216abcd/KUIDEV)
