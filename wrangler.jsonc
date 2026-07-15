@@ -6,7 +6,9 @@
   "workers_dev": true,
   "vars": {
     "ADMIN_USERNAME": "admin",
-    "ADMIN_PASSWORD": "admin"
+    "ADMIN_PASSWORD": "admin",
+    "PROXY_USER": "kui",
+    "PROXY_PASS": "kui"
   },
   "assets": {
     "directory": ".",
