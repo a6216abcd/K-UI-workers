@@ -1286,7 +1286,11 @@
                                 return live && live._realtime_ts > Number(item.last_updated || 0) ? { ...item, ...live } : item;
                             });
                             if (data.realtime_url && data.realtime_url !== realtimeUrl.value) realtimeUrl.value = data.realtime_url;
-                            if (!isLoggedIn.value && data.settings.is_public === 'true') queueMicrotask(connectPublicRealtime);
+                            // A logged-in admin must use the Dashboard channel even
+                            // while viewing the probe page. Re-check after every
+                            // probe load to avoid the login/realtime URL race.
+                            if (isLoggedIn.value && role.value === 'admin' && realtimeUrl.value) queueMicrotask(connectRealtime);
+                            else if (!isLoggedIn.value && data.settings.is_public === 'true') queueMicrotask(connectPublicRealtime);
                             updateCustomStyles();
                             if ((!isLoggedIn.value || activeTab.value === 'probe') && probeSys.custom_script && !document.getElementById('kui-custom-html-wrapper')) updateCustomScript(probeSys.custom_script);
                             if (probeView.value === 'map') drawMarkers();
