@@ -930,67 +930,38 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         singbox_config["route"]["rules"].append({"inbound": ["egress-check-in"], "outbound": s5_tag})
         s5_mode = socks5_outbound.get("mode", "global")
         if s5_mode == "selective":
-                    # 按分类选择性出站：仅勾选的分类域名走 SOCKS5
-                    CATEGORY_DOMAINS = {
-                        "youtube": {
-                            "keywords": ["youtube", "youtu", "googlevideo", "ytimg"],
-                            "suffixes": [".youtube.com", ".youtu.be", ".googlevideo.com", ".ytimg.com"]
-                        },
-                        "ai": {
-                            "keywords": ["openai", "chatgpt", "claude", "anthropic", "gemini", "bard", "copilot", "grok", "perplexity", "midjourney"],
-                            "suffixes": [".openai.com", ".anthropic.com", ".claude.ai", ".chatgpt.com", ".deepmind.com", ".cohere.com", ".huggingface.co", ".perplexity.ai", ".midjourney.com", ".ai.com"]
-                        },
-                        "google": {
-                            "keywords": ["google"],
-                            "suffixes": [".google.com", ".googleapis.com", ".googleusercontent.com", ".googlesyndication.com", ".googleadservices.com", ".gstatic.com", ".google-analytics.com"]
-                        },
-                        "streaming": {
-                            "keywords": ["netflix", "hulu", "disney", "hbo", "spotify", "tiktok", "twitch", "vimeo", "dailymotion", "bilibili", "crunchyroll", "peacock"],
-                            "suffixes": [".netflix.com", ".hulu.com", ".disneyplus.com", ".hbomax.com", ".spotify.com", ".tiktok.com", ".twitch.tv", ".vimeo.com", ".dailymotion.com", ".bilibili.com", ".crunchyroll.com", ".peacocktv.com"]
-                        }
-                    }
-                    s5_domains_raw = socks5_outbound.get("domains", "")
-                    selected = []
-                    if s5_domains_raw:
-                        try:
-                            parsed = json.loads(s5_domains_raw)
-                            if isinstance(parsed, dict):
-                                selected = parsed.get("categories", [])
-                        except Exception:
-                            pass
-                    all_keywords = []
-                    all_suffixes = []
-                    for cat in selected:
-                        entry = CATEGORY_DOMAINS.get(cat)
-                        if entry:
-                            all_keywords.extend(entry["keywords"])
-                            all_suffixes.extend(entry["suffixes"])
-                    if not all_keywords and not all_suffixes:
-                        raise RuntimeError("selective SOCKS5 mode requires at least one valid category")
-                    if all_keywords or all_suffixes:
-                        proxy_inbounds = {f"in-{node['id']}" for node in valid_nodes if node.get("protocol") != "dokodemo-door"}
-                        # Domain rules only work after sing-box extracts the TLS/HTTP
-                        # destination from inbound traffic. sing-box 1.13 requires
-                        # this as a non-final route action, not legacy inbound fields.
-                        singbox_config["route"]["rules"].insert(0, {"inbound": sorted(proxy_inbounds), "action": "sniff", "timeout": "1s"})
-                        route_rule = {"domain_keyword": all_keywords, "domain_suffix": all_suffixes, "outbound": s5_tag}
-                        singbox_config["route"]["rules"].append(route_rule)
-                        # Residential exits are IPv4-only. Prevent unmatched IPv6
-                        # requests from falling through to a previous/native path
-                        # after switching from WARP dual-stack to selective mode.
-                        singbox_config["route"]["rules"].append({"inbound": sorted(proxy_inbounds), "ip_version": 6, "action": "reject"})
-                else:
-                    # 全局出站：所有非转发节点流量走 SOCKS5
-                    existing_routed = set()
-                    for rule in singbox_config["route"]["rules"]:
-                        for ib in rule.get("inbound", []):
-                            existing_routed.add(ib)
-                    for node in valid_nodes:
-                        if node.get("protocol") == "dokodemo-door":
-                            continue
-                        in_tag = f"in-{node['id']}"
-                        if in_tag not in existing_routed:
-                            singbox_config["route"]["rules"].append({"inbound": [in_tag], "outbound": s5_tag})
+            category_domains = {
+                "youtube": {"keywords": ["youtube", "youtu", "googlevideo", "ytimg"], "suffixes": [".youtube.com", ".youtu.be", ".googlevideo.com", ".ytimg.com"]},
+                "ai": {"keywords": ["openai", "chatgpt", "claude", "anthropic", "gemini", "bard", "copilot", "grok", "perplexity", "midjourney"], "suffixes": [".openai.com", ".anthropic.com", ".claude.ai", ".chatgpt.com", ".deepmind.com", ".cohere.com", ".huggingface.co", ".perplexity.ai", ".midjourney.com", ".ai.com"]},
+                "google": {"keywords": ["google"], "suffixes": [".google.com", ".googleapis.com", ".googleusercontent.com", ".googlesyndication.com", ".googleadservices.com", ".gstatic.com", ".google-analytics.com"]},
+                "streaming": {"keywords": ["netflix", "hulu", "disney", "hbo", "spotify", "tiktok", "twitch", "vimeo", "dailymotion", "bilibili", "crunchyroll", "peacock"], "suffixes": [".netflix.com", ".hulu.com", ".disneyplus.com", ".hbomax.com", ".spotify.com", ".tiktok.com", ".twitch.tv", ".vimeo.com", ".dailymotion.com", ".bilibili.com", ".crunchyroll.com", ".peacocktv.com"]},
+            }
+            try:
+                selected = json.loads(socks5_outbound.get("domains", "{}") or "{}").get("categories", [])
+            except Exception:
+                selected = []
+            all_keywords, all_suffixes = [], []
+            for category in selected:
+                entry = category_domains.get(category)
+                if entry:
+                    all_keywords.extend(entry["keywords"])
+                    all_suffixes.extend(entry["suffixes"])
+            if not all_keywords and not all_suffixes:
+                raise RuntimeError("selective SOCKS5 mode requires at least one valid category")
+            proxy_inbounds = sorted(f"in-{node['id']}" for node in valid_nodes if node.get("protocol") != "dokodemo-door")
+            if proxy_inbounds:
+                singbox_config["route"]["rules"].insert(0, {"inbound": proxy_inbounds, "action": "sniff", "timeout": "1s"})
+                singbox_config["route"]["rules"].append({"domain_keyword": all_keywords, "domain_suffix": all_suffixes, "outbound": s5_tag})
+                singbox_config["route"]["rules"].append({"inbound": proxy_inbounds, "ip_version": 6, "action": "reject"})
+        else:
+            # 全局出站：所有非转发节点流量走 SOCKS5
+            existing_routed = {inbound for rule in singbox_config["route"]["rules"] for inbound in rule.get("inbound", [])}
+            for node in valid_nodes:
+                if node.get("protocol") == "dokodemo-door":
+                    continue
+                in_tag = f"in-{node['id']}"
+                if in_tag not in existing_routed:
+                    singbox_config["route"]["rules"].append({"inbound": [in_tag], "outbound": s5_tag})
 
     if warp_mode != "off":
         if mesh_enabled:
