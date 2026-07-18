@@ -93,7 +93,16 @@ function compactRoleState(role, data) {
 
 async function verifyAdmin(header, request, env) {
   try {
-    if (!header) return false;
+    if (!header?.startsWith("Bearer ")) return false;
+    const token = header.slice(7);
+    if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) return false;
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+    const tokenHash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+    const session = await env.DB.prepare("SELECT username FROM auth_sessions WHERE token_hash = ? AND expires_at > ?").bind(tokenHash, Date.now()).first();
+    if (session?.username === (env.ADMIN_USERNAME || "admin")) return true;
+
+    // Signed browser requests are validated by the Pages API. Keep this
+    // fallback for clients that have not yet migrated to session tokens.
     const configured = pagesOrigins(env);
     const origins = configured.length ? configured : [requestPagesOrigin(request, env)].filter(Boolean);
     for (const origin of origins) {
