@@ -3,6 +3,7 @@
   "name": "kui",
   "main": "src/worker.js",
   "compatibility_date": "2026-07-15",
+  "compatibility_flags": ["assets_navigation_prefer_worker"],
   "workers_dev": true,
   "vars": {
     "ADMIN_USERNAME": "admin",
@@ -11,13 +12,15 @@
     "PROXY_PASS": "kui"
   },
   "assets": {
-    "directory": ".",
+    "directory": "static",
     "binding": "ASSETS",
-    "run_worker_first": ["/api", "/api/*"]
+    "run_worker_first": ["/api", "/api/*", "/health", "/agent/ws", "/dashboard/*", "/public/*", "/notify", "/public-policy", "/frequency-policy"]
   },
   "d1_databases": [
     {
-      "binding": "DB"
+      "binding": "DB",
+      "database_name": "kui-db",
+      "database_id": ""
     }
   ],
   "triggers": {
