@@ -3,7 +3,6 @@
   "name": "kui",
   "main": "src/worker.js",
   "compatibility_date": "2026-07-15",
-  "compatibility_flags": ["assets_navigation_prefer_worker"],
   "workers_dev": true,
   "vars": {
     "ADMIN_USERNAME": "admin",
@@ -19,8 +18,7 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "kui-db",
-      "database_id": ""
+      "database_name": "kui-db"
     }
   ],
   "triggers": {
